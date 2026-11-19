@@ -79,20 +79,22 @@ def main():
     zb = io.BytesIO()
     with zipfile.ZipFile(zb, "w") as z:
         z.writestr("X64/EFI/OC/OpenCore.efi", b"release-bytes")
-    base = "https://github.com/dortania/build-repo/releases/download/" + validate.NULLMOTH_OC_BASE
+    root = "https://github.com/dortania/build-repo/releases/download/"
     with zipfile.ZipFile(zb) as z:
-        ours = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base)
-        other = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base.replace("6d8490d", "0000000"))
-    arm("the fixed OpenCore.efi replaces the release's on its own base release",
-        hashlib.sha256(ours).hexdigest() == validate.NULLMOTH_OC_SHA256, hashlib.sha256(ours).hexdigest()[:8])
+        for base, (_, sha) in validate.NULLMOTH_OC.items():
+            got = hashlib.sha256(validate._expected_bytes(z, "EFI/OC/OpenCore.efi", root + base)).hexdigest()
+            arm("the fixed OpenCore.efi replaces the release's on " + base.split("/")[0], got == sha, got[:8])
+        other = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", root + "OpenCorePkg-0000000/OpenCore-1.0.9-DEBUG.zip")
     arm("any other OpenCore release keeps its own OpenCore.efi", other == b"release-bytes", other[:16])
-    saved = validate.NULLMOTH_OC_SHA256
-    validate.NULLMOTH_OC_SHA256 = "0" * 64
+    saved = dict(validate.NULLMOTH_OC)
+    base = next(iter(saved))
+    validate.NULLMOTH_OC[base] = (saved[base][0], "0" * 64)
     try:
         with zipfile.ZipFile(zb) as z:
-            damaged = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base)
+            damaged = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", root + base)
     finally:
-        validate.NULLMOTH_OC_SHA256 = saved
+        validate.NULLMOTH_OC.clear()
+        validate.NULLMOTH_OC.update(saved)
     arm("a bundled OpenCore.efi that fails its hash is not used", damaged == b"release-bytes", damaged[:16])
 
     d = _copy(FIXTURE)
@@ -214,6 +216,12 @@ def main():
     from Scripts import resource_fetcher as rf  # noqa: PLC0415
     tries = []
 
+    # a real (empty) zip: a .zip download is opened before it is kept, so two bytes would be refused as a bad archive
+    import io as _io, zipfile as _zip  # noqa: PLC0415
+    _zb = _io.BytesIO()
+    _zip.ZipFile(_zb, "w").close()
+    STALL_BODY = _zb.getvalue()
+
     class Stall(rf.ResourceFetcher):
         def _make_request(self, url, timeout=30):
             return object()
@@ -222,7 +230,8 @@ def main():
             tries.append(1)
             if len(tries) < 3:
                 raise TimeoutError("The read operation timed out")
-            fh.write(b"ok")
+            fh.write(STALL_BODY)
+            return hashlib.sha256(STALL_BODY).hexdigest()  # the real one returns the hash of what it wrote
     real_sleep, engine.time.sleep = engine.time.sleep, lambda s: None
     try:
         dest = os.path.join(tempfile.mkdtemp(prefix="1401-selftest-"), "f")
@@ -253,7 +262,7 @@ def main():
         unkept = os.path.exists(os.path.join(validate_mod.CACHE, "OpenCore-1.0.9-RELEASE.zip"))
         tries.clear(); tries.extend([1, 1])
         import hashlib  # noqa: PLC0415
-        Stall().download_and_save_file("https://example.invalid/x/OpenCore-1.0.9-RELEASE.zip", dest, hashlib.sha256(b"ok").hexdigest())
+        Stall().download_and_save_file("https://example.invalid/x/OpenCore-1.0.9-RELEASE.zip", dest, hashlib.sha256(STALL_BODY).hexdigest())
         kept = os.path.exists(os.path.join(validate_mod.CACHE, "OpenCore-1.0.9-RELEASE.zip"))
     finally:
         validate_mod.CACHE = real_cache
@@ -261,7 +270,7 @@ def main():
     arm("the engine's checked OpenCore zip is kept for the validator (no second download)", kept, kept)
 
     vmd = engine.stop_message(["5. Storage Controllers:", "Intel VMD controllers are not supported in macOS.\nPlease disable Intel VMD"])
-    arm("a VMD stop leads with 'Turn off Intel VMD'", vmd.startswith("Turn off Intel VMD"), vmd[:40])
+    arm("a VMD stop leads with the Intel VMD guidance", vmd.startswith("This builder cannot continue with the reported Intel VMD controller"), vmd[:70])
     plain = engine.stop_message(["something else"])
     arm("a stop with no known fix keeps the engine's words first", plain.startswith("OpenCore-Simplify stopped"), plain[:30])
 
@@ -384,7 +393,8 @@ def main():
     r, notes = report.normalize({"Input": {}, "Sound": {"Focusrite USB Audio": {"Bus Type": "FOCUSRITEUSB"},
                                            "Realtek(R) Audio": {"Bus Type": "HDAUDIO"}}})
     arm("a USB audio interface without a Device ID is dropped (class-compliant; never in the EFI)",
-        "Focusrite USB Audio" not in r["Sound"] and len(notes) == 1, notes[:1])
+        "Focusrite USB Audio" not in r["Sound"] and "Realtek(R) Audio" in r["Sound"]
+        and sum("Focusrite USB Audio" in n for n in notes) == 1, [n for n in notes if "Focusrite" in n][:1])
     r2, n2 = report.normalize({"Sound": {}})
     arm("a report with no Input section gets an empty one (one was rejected for it), and says so",
         r2.get("Input") == {} and any(n.startswith("Input:") for n in n2), n2)

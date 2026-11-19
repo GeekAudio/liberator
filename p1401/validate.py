@@ -257,25 +257,32 @@ def release_archive():
     return data
 
 
-# OpenCore.efi built from the same OpenCorePkg commit the DEBUG release below was built from, plus two fixes:
+# OpenCore.efi built from the same OpenCorePkg commit each DEBUG release below was built from, plus two fixes:
 # acidanthera/OpenCorePkg#661 (AMP package count matched to CPUID capacity, for hybrid Intel CPUs) and the console
 # handle passed by value in OcConsoleLib, which otherwise hangs boot on a machine with no GOP at start. It is used only
-# when the engine downloaded exactly that release; any other OpenCore version keeps its own OpenCore.efi.
-NULLMOTH_OC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'OpenCore-1.0.9-nullmoth.efi')
-NULLMOTH_OC_SHA256 = 'ad0bab3b93ef402d6e49abe43230c6b45083a7ec017cae90b6b0162ebc69a86d'
-NULLMOTH_OC_BASE = 'OpenCorePkg-6d8490d/OpenCore-1.0.9-DEBUG.zip'
+# when the engine downloaded one of the releases below; any other OpenCore version keeps its own OpenCore.efi.
+# One build per release: the release's download path -> (bundled file, its sha256).
+NULLMOTH_OC = {
+    'OpenCorePkg-6d8490d/OpenCore-1.0.9-DEBUG.zip':
+        ('OpenCore-1.0.9-6d8490d-nullmoth.efi', 'ad0bab3b93ef402d6e49abe43230c6b45083a7ec017cae90b6b0162ebc69a86d'),
+    'OpenCorePkg-ebea824/OpenCore-1.0.9-DEBUG.zip':
+        ('OpenCore-1.0.9-ebea824-nullmoth.efi', 'b61f01655b10adb71167366290985feb52aef0533952f4960cf2f1cac6b04f41'),
+}
 
 
 def _nullmoth_opencore(url):
-    """Our OpenCore.efi bytes when the release is the one it was built against and the bundled file is intact, else None."""
-    if not url or not url.endswith(NULLMOTH_OC_BASE):
+    """Our OpenCore.efi bytes when the release is one it was built against and the bundled file is intact, else None."""
+    for base, (name, sha) in NULLMOTH_OC.items():
+        if url and url.endswith('/' + base):
+            break
+    else:
         return None
     try:
-        with open(NULLMOTH_OC_FILE, 'rb') as stream:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), name), 'rb') as stream:
             data = stream.read()
     except OSError:
         return None
-    return data if hashlib.sha256(data).hexdigest() == NULLMOTH_OC_SHA256 else None
+    return data if hashlib.sha256(data).hexdigest() == sha else None
 
 
 def _expected_bytes(archive, relative, url):
