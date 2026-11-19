@@ -264,9 +264,9 @@ def release_archive():
 # One build per release: the release's download path -> (bundled file, its sha256).
 NULLMOTH_OC = {
     'OpenCorePkg-6d8490d/OpenCore-1.0.9-DEBUG.zip':
-        ('OpenCore-1.0.9-6d8490d-nullmoth.efi', 'ad0bab3b93ef402d6e49abe43230c6b45083a7ec017cae90b6b0162ebc69a86d'),
+        ('OpenCore-1.0.9-6d8490d-nullmoth.efi', '258d346f409db38e5f11b9a994222dbd6dfe42c7fc39e60d5fd9e6f7958f6209'),
     'OpenCorePkg-ebea824/OpenCore-1.0.9-DEBUG.zip':
-        ('OpenCore-1.0.9-ebea824-nullmoth.efi', 'b61f01655b10adb71167366290985feb52aef0533952f4960cf2f1cac6b04f41'),
+        ('OpenCore-1.0.9-ebea824-nullmoth.efi', '3e0366519b8d3f246bd6576b7a0c61f0f72f7b3ab88ba5efab5ae637506a3419'),
 }
 
 

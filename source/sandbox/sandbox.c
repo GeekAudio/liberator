@@ -153,9 +153,15 @@ extern void proc_name(int pid, char *buf, int size);
 /* proc_find_audit_token (sys/proc.h, BSDKernel): proc_find + pidversion == val[7], else NULL */
 
 #define SBT_N   4096        /* live sandboxed processes at once; chosen, ~10x what a full desktop runs */
-#define SBC_N   252         /* distinct containers at once; 252 not 256 so the vault table fits the same __DATA pages */
+#define SBC_N   154         /* distinct containers at once (about 60 on a full desktop). Sized so the process table's origin fields
+                               fit in the same __DATA size, which keeps the boot kernel collection's layout and the kit's patch
+                               records after this kext where they are */
 #define SBC_LEN 1024        /* MAXPATHLEN */
-static struct { const struct proc *key; int pid; short ci; } sbt[SBT_N];   /* key 0 = free; ci -1 = no container */
+/* rpid/rwhy/rnm = the process that applied the profile (the ROOT, copied unchanged to every fork child) and how:
+   'c' op 0 container profile, 'a' op 1 sandbox_apply. Beta 4: `log` on 27 said "Cannot run while sandboxed" with no
+   recorded reason - inherited entries were never logged, so the origin was invisible. */
+static struct { const struct proc *key; int pid; short ci; char rwhy; int rpid; char rnm[17]; } sbt[SBT_N];   /* key 0 = free; ci -1 = no container */
+static unsigned int sb_self_logged;
 static char sbc[SBC_N][SBC_LEN];
 static lck_mtx_t *sb_mtx;
 static unsigned int sb_set_logged, sb_full_logged;
@@ -167,7 +173,9 @@ static unsigned int sb_set_logged, sb_full_logged;
    (Weather, Photos) stayed empty. Rule: once a process has applied its own profile, the vaults it marked itself are
    closed to it. Vaults marked by others and app-sandboxed processes (op 0) are untouched. */
 #define SBV_N 64            /* vaults remembered at once; chosen, a handful of daemons mark one each */
-static struct { const struct proc *key; int pid; vnode_t vp; uint32_t vid; int closed; } sbv[SBV_N];
+#define SBV_PER_PROC 8      /* chosen: one process may hold at most 8; its 9th replaces its oldest open one */
+static struct { const struct proc *key; int pid; vnode_t vp; uint32_t vid; int closed; uint32_t seq; } sbv[SBV_N];
+static uint32_t sbv_seq;
 static unsigned int sbv_logged;
 static volatile int sbv_any;   /* set once any vault is closed; the open hook costs one load until then */
 
@@ -200,12 +208,13 @@ static int sbc_intern_locked(const char *path)
     return -2;
 }
 
-static int sbt_put_locked(const struct proc *k, int pid, short ci)
+static int sbt_put_locked(const struct proc *k, int pid, short ci, char rwhy, int rpid, const char *rnm)
 {
     int i = sbt_find_locked(k, pid);
     if (i < 0) for (int j = 0; j < SBT_N; j++) if (!sbt[j].key) { i = j; break; }
     if (i < 0) return ENOSPC;
     sbt[i].key = k; sbt[i].pid = pid; sbt[i].ci = ci;
+    sbt[i].rwhy = rwhy; sbt[i].rpid = rpid; strlcpy(sbt[i].rnm, rnm ? rnm : "?", sizeof sbt[i].rnm);
     return 0;
 }
 
@@ -221,10 +230,11 @@ static int sb_profile_set(user_addr_t arg)
     if (a[2]) { int e = copyinstr(a[2], path, sizeof path, &done); if (e) return e; }
     struct proc *me = current_proc();
     int pid = proc_pid(me), e = 0;
+    char rnm[17]; proc_name(pid, rnm, sizeof rnm);
     lck_mtx_lock(sb_mtx);
     short ci = -1;
     if (path[0]) { int c = sbc_intern_locked(path); if (c == -2) e = ENOSPC; else ci = (short)c; }
-    if (!e) e = sbt_put_locked(me, pid, ci);
+    if (!e) e = sbt_put_locked(me, pid, ci, 'c', pid, rnm);
     lck_mtx_unlock(sb_mtx);
     if (e) {
         if (sb_full_logged++ < 8) printf("a2x-sandbox: profile for pid %d NOT recorded (%d) - table full\n", pid, e);
@@ -264,7 +274,7 @@ static void sb_cred_label_associate_fork(void *cred, struct proc *child)
     lck_mtx_lock(sb_mtx);
     sbt_drop_locked(child);
     int i = sbt_find_locked(parent, proc_pid(parent));
-    if (i >= 0) e = sbt_put_locked(child, cpid, sbt[i].ci);
+    if (i >= 0) e = sbt_put_locked(child, cpid, sbt[i].ci, sbt[i].rwhy, sbt[i].rpid, sbt[i].rnm);
     lck_mtx_unlock(sb_mtx);
     if (e && sb_full_logged++ < 8) printf("a2x-sandbox: fork child pid %d NOT recorded - table full\n", cpid);
 }
@@ -292,8 +302,19 @@ static void sbv_mark(user_addr_t arg)
     lck_mtx_lock(sb_mtx);
     for (int i = 0; i < SBV_N && !placed; i++)
         if (sbv[i].key == me && sbv[i].pid == pid && sbv[i].vp == vp && sbv[i].vid == vid) placed = 1;
+    int mine = 0, oldest = -1;
     for (int i = 0; i < SBV_N && !placed; i++)
-        if (!sbv[i].key) { sbv[i].key = me; sbv[i].pid = pid; sbv[i].vp = vp; sbv[i].vid = vid; sbv[i].closed = 0; placed = 1; }
+        if (sbv[i].key == me && sbv[i].pid == pid) {
+            mine++;
+            if (!sbv[i].closed && (oldest < 0 || sbv[i].seq < sbv[oldest].seq)) oldest = i;
+        }
+    int slot = -1;
+    if (!placed && mine >= SBV_PER_PROC) slot = oldest;          /* over its share: replace its own oldest open vault */
+    for (int i = 0; i < SBV_N && !placed && slot < 0 && mine < SBV_PER_PROC; i++) if (!sbv[i].key) slot = i;
+    if (!placed && slot >= 0) {
+        sbv[slot].key = me; sbv[slot].pid = pid; sbv[slot].vp = vp; sbv[slot].vid = vid; sbv[slot].closed = 0;
+        sbv[slot].seq = ++sbv_seq; placed = 1;
+    }
     lck_mtx_unlock(sb_mtx);
     file_drop((int)a[0]);
     if (!placed && sbv_logged++ < 8) printf("a2x-sandbox: vault for pid %d NOT recorded - table full\n", pid);
@@ -305,8 +326,9 @@ static int sbv_apply(void)
     if (!sb_mtx) return 0;
     struct proc *me = current_proc();
     int pid = proc_pid(me), n = 0, e;
+    char rnm[17]; proc_name(pid, rnm, sizeof rnm);
     lck_mtx_lock(sb_mtx);
-    e = sbt_put_locked(me, pid, -1);
+    e = sbt_put_locked(me, pid, -1, 'a', pid, rnm);
     for (int i = 0; i < SBV_N; i++) if (sbv[i].key == me && sbv[i].pid == pid) { sbv[i].closed = 1; n++; }
     if (n) sbv_any = 1;
     lck_mtx_unlock(sb_mtx);
@@ -376,6 +398,17 @@ static int sb_policy_syscall(struct proc *p, int call, user_addr_t arg)
             int r = sb_is_sandboxed((int)a[1], (a[5] & 0x40000000ULL) != 0, (int)a[6], 0, 0);
             if (r < 0) return ESRCH;
             res = (uint64_t)r;
+            int me = proc_pid(current_proc());
+            if (r == 1 && (int)a[1] == me && sb_self_logged < 48) {
+                char nm[17], why = '?', rn[17] = "?"; int rp = -1;
+                proc_name(me, nm, sizeof nm);
+                lck_mtx_lock(sb_mtx);
+                int i = sbt_find_locked(current_proc(), me);
+                if (i >= 0) { why = sbt[i].rwhy; rp = sbt[i].rpid; strlcpy(rn, sbt[i].rnm, sizeof rn); }
+                lck_mtx_unlock(sb_mtx);
+                sb_self_logged++;
+                printf("a2x-sandbox: self-check pid %d %s = sandboxed; root pid %d %s via %c\n", me, nm, rp, rn, why);
+            }
         }
         if (a[0]) (void)copyout(&res, (user_addr_t)a[0], sizeof res);
         return 0;
