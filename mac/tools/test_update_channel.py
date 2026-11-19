@@ -49,6 +49,15 @@ fixtures = {
     "ch_none": {"stable": entry("2.3.3"), "prerelease": None, "updated": "x"},
     "ch_old": {"stable": entry("2.3.3"), "prerelease": entry("2.3.3"), "updated": "x"},   # not newer than stable
     "ch_bad": {"stable": entry("2.3.3"), "prerelease": {"tag": "v2.3.4/../../x"}},       # not a plain tag
+    "list_beta": [
+        {"tag_name": "v3.0.0-beta.2", "prerelease": True, "draft": False, "assets": [{"name": "x"}]},
+        {"tag_name": "v3.0.0-beta.10", "prerelease": True, "draft": False, "assets": [{"name": "x"}]},
+        {"tag_name": "v3.0.0-beta.9", "prerelease": True, "draft": False, "assets": [{"name": "x"}]},
+        {"tag_name": "v3.0.1", "prerelease": True, "draft": True, "assets": [{"name": "x"}]},
+        {"tag_name": "weekly-build", "prerelease": False, "draft": False, "assets": [{"name": "x"}]}],
+    "list_full": [
+        {"tag_name": "v3.0.0-beta.3", "prerelease": True, "draft": False, "assets": [{"name": "x"}]},
+        {"tag_name": "v3.0.0", "prerelease": False, "draft": False, "assets": [{"name": "x"}]}],
     "rel_stable": {"tag_name": "v2.3.3", "prerelease": False, "draft": False, "assets": [{"name": "SHA256SUMS.txt"}]},
     "rel_pre": {"tag_name": "v2.3.4", "prerelease": True, "draft": False, "assets": [{"name": "x"}]},
     "rel_draft": {"tag_name": "v2.3.5", "prerelease": True, "draft": True, "assets": [{"name": "x"}]},
@@ -67,6 +76,8 @@ print(url(false, load("ch_pre")))
 print(url(true, load("ch_none")), url(true, nil), url(true, load("ch_old")), url(true, load("ch_bad")))
 print(tag(UpdateChannel.pick(load("rel_stable"), early: false)), tag(UpdateChannel.pick(load("rel_pre"), early: false)))
 print(tag(UpdateChannel.pick(load("rel_pre"), early: true)), tag(UpdateChannel.pick(load("rel_draft"), early: true)), tag(UpdateChannel.pick(load("rel_noassets"), early: true)))
+print(tag(UpdateChannel.pick(load("list_beta"), early: false)), tag(UpdateChannel.pick(load("list_full"), early: false)), tag(UpdateChannel.pick([] as [[String: Any]], early: true)))
+print(UpdateChannel.newer("v3.0.0", than: "v3.0.0-beta.9"), UpdateChannel.newer("v3.0.0-beta.10", than: "v3.0.0-beta.9"), UpdateChannel.newer("v3.0.0-beta.2", than: "v3.0.0"), UpdateChannel.betaProduct)
 print(UpdateChannel.newer("v2.3.10", than: "v2.3.9"), UpdateChannel.newer("v2.3.2", than: "v2.3.2"))
 ''')
     try:
@@ -77,15 +88,18 @@ print(UpdateChannel.newer("v2.3.10", than: "v2.3.9"), UpdateChannel.newer("v2.3.
         out = []
         arm("UpdateChannel.swift compiles", False, e.stderr[-400:])
     if out:
-        latest = "https://api.github.com/repos/nullmoth/nvidia-macos-driver/releases/latest"
+        latest = "https://api.github.com/repos/nullmoth/liberator/releases?per_page=30"
         arm("early updates with a newer pre-release in the channels file ask GitHub for that tag",
-            out[0] == "https://api.github.com/repos/nullmoth/nvidia-macos-driver/releases/tags/v2.3.4", out[0])
+            out[0] == "https://api.github.com/repos/nullmoth/liberator/releases/tags/v2.3.4", out[0])
         arm("the stable channel ignores the channels file", out[1] == latest, out[1])
         arm("no pre-release, no file, one not newer than stable, or a malformed tag: the full release",
             out[2] == " ".join([latest] * 4), out[2])
         arm("the stable channel takes the full release and refuses a pre-release", out[3] == "v2.3.3 nil", out[3])
         arm("the early channel takes the pre-release; a draft or an asset-less release is never offered", out[4] == "v2.3.4 nil nil", out[4])
-        arm("tags compare by number, 2.3.10 above 2.3.9", out[5] == "true false", out[5])
+        arm("the list endpoint: newest tag wins (beta.10 above beta.9), drafts and non-version tags are skipped, betas are offered",
+            out[5] == "v3.0.0-beta.10 v3.0.0 nil", out[5])
+        arm("a beta sorts below its own release; beta numbers compare as numbers", out[6] == "true true false true", out[6])
+        arm("tags compare by number, 2.3.10 above 2.3.9", out[7] == "true false", out[7])
 
 print("Early updates: the stable channel can never be offered a pre-release; the early channel takes the one the site names."
       if not fails else f"{fails} FAILED")

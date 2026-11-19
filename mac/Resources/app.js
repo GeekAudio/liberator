@@ -37,7 +37,11 @@ function render(m) {
   const pk = m.packages.find((p) => p.ok === "yes"); if (pk) S.pkg = pk.path;
   // Golden Gate: the card exists only when this build carries a kit pin; its steps run only from the starting systems
   $("ggcard").hidden = !m.goldenGate;
-  S.ggReady = !!m.goldenGate && OS_FROM.includes(m.major) && !why;
+  // Golden Gate is not the NVIDIA driver: a PC on AMD or Intel graphics, a laptop whose NVIDIA chip is off and a real
+  // Mac are all its to take, and its own check says whether this machine can go (graphics path, OpenCore, space).
+  // Only what rules out every path stops it here; the NVIDIA reasons above are about installing that driver.
+  const ggWhy = (m.arch !== "x86_64" || m.translated) || !OS_FROM.includes(m.major);
+  S.ggReady = !!m.goldenGate && !ggWhy;
   S.ggKit = m.ggKit || "none";
   const kept = $("ggkept"), mb = Number(m.ggKeptMB) || 0;
   kept.textContent = mb > 0 ? kept.dataset.kept.replace("{n}", (mb / 1000).toFixed(1)) : kept.dataset.none;

@@ -144,6 +144,15 @@ done
 
 echo "== 3. boot-time bring-up"
 run mkdir -p "$(r /Library/NullMoth/bringup)" "$(r /usr/local/libexec)" "$(r /Library/LaunchDaemons)"
+# Interpreter stop reports: any process adds one, nothing but root reads, replaces or deletes. Root-owned, sticky,
+# write+search for everyone (1733) - never the world-writable 1777 an earlier build left behind.
+run mkdir -p "$(r /private/var/tmp/a2x-reports)"
+run chown root:wheel "$(r /private/var/tmp/a2x-reports)"
+run chmod 1733 "$(r /private/var/tmp/a2x-reports)"
+if [ "$MODE" = "--apply" ]; then
+  [ "$(stat -f '%u:%g %Sp' "$(r /private/var/tmp/a2x-reports)")" = "0:0 drwx-wx-wt" ] || die "a2x-reports is not root:wheel 1733"
+  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && chmod 600 "$rf"; done
+fi
 for f in nvload.sh ws-gate.sh lw-gate.sh cryptex-place.sh start-report.sh nvgo wsready; do
   [ -f "$HERE/bringup/$f" ] || die "kit has no bringup/$f"
   place 755 "$HERE/bringup/$f" "$(r "/Library/NullMoth/bringup/$f")"
@@ -157,6 +166,14 @@ for p in com.nullmoth.a2xarm.plist com.nullmoth.a2xuserapps.plist com.nullmoth.b
   /usr/bin/plutil -lint "$HERE/daemons/$p" >/dev/null || die "$p does not parse"
   place 644 "$HERE/daemons/$p" "$(r "/Library/LaunchDaemons/$p")"
 done
+
+echo "== 3b. Apple's own macOS updates are not downloaded or installed by themselves"
+# The kernel collections and the system patches of this package are made for one build ($KITBUILD). A newer macOS 27 build
+# installed over it would start without them, so Apple's update is checked for but never taken without the owner asking
+# (see docs/UPDATES.md). Security data and configuration data updates stay on.
+[ -f "$HERE/hold/com.apple.SoftwareUpdate.plist" ] || die "kit has no hold/com.apple.SoftwareUpdate.plist"
+/usr/bin/plutil -lint "$HERE/hold/com.apple.SoftwareUpdate.plist" >/dev/null || die "hold/com.apple.SoftwareUpdate.plist does not parse"
+add 644 "$HERE/hold/com.apple.SoftwareUpdate.plist" /Library/Preferences/com.apple.SoftwareUpdate.plist
 
 echo "== 3a. two files macOS 27 needs on an Intel PC and does not have"
 add 644 "$HERE/driverkit/dyld_shared_cache_x86_64" /System/DriverKit/System/Library/dyld/dyld_shared_cache_x86_64
