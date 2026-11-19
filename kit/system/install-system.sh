@@ -156,7 +156,9 @@ run chown -h root:wheel "$RD"
 run chmod -h 1733 "$RD"
 if [ "$MODE" = "--apply" ]; then
   [ "$(stat -f '%u:%g %Sp' "$(r /private/var/tmp/a2x-reports)")" = "0:0 drwx-wx-wt" ] || die "a2x-reports is not root:wheel 1733"
-  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && [ "$(stat -f %l "$rf")" = 1 ] && chmod -h 600 "$rf"; done   # a hard link is someone else's file
+  # Set the mode on an open descriptor, never by path: open without following links, then check the same
+  # file (regular, one link) and fchmod it. A path check followed by chmod can be raced in a shared folder.
+  /usr/bin/perl -e 'use Fcntl; for (@ARGV) { sysopen(my $f, $_, O_RDONLY|O_NOFOLLOW|O_NONBLOCK) or next; my @s = stat($f); chmod(0600, $f) if -f _ && $s[3] == 1; close $f }' "$(r /private/var/tmp/a2x-reports)"/*.log
 fi
 for f in nvload.sh ws-gate.sh lw-gate.sh cryptex-place.sh start-report.sh nvgo wsready; do
   [ -f "$HERE/bringup/$f" ] || die "kit has no bringup/$f"
