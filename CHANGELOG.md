@@ -1,5 +1,27 @@
 # Changelog
 
+## Liberator Beta 4
+- Version 0.4.0, built for its own kit (release tag v3.0.0-beta.4).
+- Apple's arm64-only programs run on a new, faster engine across all of macOS 27, every app and background service.
+- The menu bar no longer restarts over and over (Control Center stopped crashing at start).
+- Command-line tools that load the C++ library late, such as `strings`, `nm` and `clang`, run.
+- Every Apple silicon program starts about 10 ms sooner: the interpreter finds what it patches in Apple's LaunchServices in one pass and reads only the part of a program it signs (a small program went from about 19 ms to about 8 ms to start).
+- Apps start faster: the graphics driver now loads in about 4 ms instead of about 170 ms.
+- Core Image work is faster: a large filtered image went from about 227 ms to about 159 ms, with identical pixels.
+- Apps may use all of the graphics card's memory, not just part of it.
+- The graphics driver writes far fewer log lines.
+- Widgets: the Sandbox policy for Intel no longer runs out of room when a system service opens many data vaults, which left widgets blank.
+- Spotlight: one of the two causes of its endless indexing errors is fixed.
+- PCs: devices under the platform driver carry their ACPI path, as on a real Mac, so drivers that look a device up by it find it.
+- Golden Gate accepts the OpenCore build already on the PC. A driver folder with no code that names a held driver is held too.
+- OpenCore.efi in the kit fixes starting on processors with performance and efficiency cores, and on graphics cards with no firmware console.
+- Built-in graphics (iGPU): a PC whose Tahoe runs its Intel or AMD built-in graphics on Apple's driver now gets those drivers carried to macOS 27, as real Macs did in Beta 3. WhateverGreen, WhateverXe and NootedRed keep loading on macOS 27 for it. Only graphics drivers are carried on a PC. Every other built-in graphics chip takes the test package. Untried on real hardware so far. Which chips each route covers, and links to the community drivers for Tahoe, are in docs/IGPU-GOLDEN-GATE.md.
+- Updates: the app looks for its own updates in the Liberator releases (it looked at the NVIDIA driver's), and offers beta releases to everyone while every release is a beta.
+- Apple's own macOS 27 updates are not downloaded or installed by themselves, since a newer build would start without the kit's system files. Security data updates stay on (docs/UPDATES.md).
+- The Golden Gate button no longer asks for an NVIDIA card: a PC on AMD or Intel graphics, or a real Mac, can start it.
+- The interpreter's stop reports folder can be written by any program but read only by root.
+- Not yet: Wi-Fi on macOS 27, and the second Spotlight cause.
+
 ## Liberator Beta 3
 - Version 0.3.0, built for its own kit (release tag v3.0.0-beta.3).
 - macOS 27 now runs the 3.0 NVIDIA driver, the same driver generation as the 3.0 release for macOS 15 and 26, built for macOS 27.
