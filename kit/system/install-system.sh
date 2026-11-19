@@ -146,12 +146,17 @@ echo "== 3. boot-time bring-up"
 run mkdir -p "$(r /Library/NullMoth/bringup)" "$(r /usr/local/libexec)" "$(r /Library/LaunchDaemons)"
 # Interpreter stop reports: any process adds one, nothing but root reads, replaces or deletes. Root-owned, sticky,
 # write+search for everyone (1733) - never the world-writable 1777 an earlier build left behind.
-run mkdir -p "$(r /private/var/tmp/a2x-reports)"
-run chown root:wheel "$(r /private/var/tmp/a2x-reports)"
-run chmod 1733 "$(r /private/var/tmp/a2x-reports)"
+# /var/tmp is writable by everyone: a link or a file someone else put at this name is refused, never followed.
+RD="$(r /private/var/tmp/a2x-reports)"
+[ -L "$RD" ] && die "a2x-reports is a link; remove $RD and run again"
+[ -e "$RD" ] && [ ! -d "$RD" ] && die "a2x-reports is not a folder; remove $RD and run again"
+[ -d "$RD" ] && [ "$(stat -f %u "$RD")" != 0 ] && die "a2x-reports is not owned by root; remove $RD and run again"
+run mkdir -p "$RD"
+run chown -h root:wheel "$RD"
+run chmod -h 1733 "$RD"
 if [ "$MODE" = "--apply" ]; then
   [ "$(stat -f '%u:%g %Sp' "$(r /private/var/tmp/a2x-reports)")" = "0:0 drwx-wx-wt" ] || die "a2x-reports is not root:wheel 1733"
-  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && chmod 600 "$rf"; done
+  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && chmod -h 600 "$rf"; done
 fi
 for f in nvload.sh ws-gate.sh lw-gate.sh cryptex-place.sh start-report.sh nvgo wsready; do
   [ -f "$HERE/bringup/$f" ] || die "kit has no bringup/$f"
