@@ -375,8 +375,8 @@ apple_graphics_ids() {  # VVVV:DDDD of every AMD, Intel and older NVIDIA chip a 
 }
 kit_carries() {  # $1 = nvidia, apple or test: does this kit carry macOS 27 graphics for that path
   local n i; n=$(kv graphics) || n=""
-  # the kit's package for Apple's own drivers serves real Macs (the whole Mac, from its own Tahoe); a PC has none yet
-  [ "$1" = apple ] && [ -n "${EFIKIND:-}" ] && [ "$EFIKIND" != mac ] && return 1
+  # the kit's package for Apple's own drivers serves a real Mac (the whole Mac, from its own Tahoe) and a PC whose
+  # Tahoe runs its built-in graphics on Apple's driver (that driver alone is carried over)
   case "$n" in ''|*[!0-9]*) [ "$1" = nvidia ]; return;; esac   # a kit that names none is an NVIDIA kit
   i=0; while [ "$i" -lt "$n" ]; do [ "$(kv graphics.$i)" = "$1" ] && return 0; i=$((i + 1)); done; return 1
 }
@@ -1029,6 +1029,10 @@ EOF
     # a laptop without its keyboard, trackpad and battery drivers cannot be used on macOS 27 at all
     n=$(kv try_27) || n=0; case "$n" in ''|*[!0-9]*) n=0;; esac
     j=0; while [ "$j" -lt "$n" ]; do keep="$keep$(kv try_27.$j) "; j=$((j + 1)); done
+    # on Apple's-driver graphics the plug-ins that let Apple's driver take this GPU (WhateverGreen, WhateverXe) have to
+    # load on macOS 27 as well: the driver is carried over from this machine's Tahoe and attaches only through them
+    if [ "$GFX" = apple ]; then n=$(kv gfx_27) || n=0; case "$n" in ''|*[!0-9]*) n=0;; esac
+      j=0; while [ "$j" -lt "$n" ]; do keep="$keep$(kv gfx_27.$j) "; j=$((j + 1)); done; fi
     n=$(cget Kernel.Add); i=0
     while [ "$i" -lt "$n" ]; do
       name=$(bundle_at "$i"); exe=$(cget "Kernel.Add.$i.ExecutablePath")

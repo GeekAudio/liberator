@@ -452,11 +452,9 @@ with tempfile.TemporaryDirectory() as td:
     arm("a PC's own build (it loads an SMC stand-in) is taken as this PC's own, not a Mac's", rc == 0 and "are this PC's own OpenCore files" in out and "a Mac's own" not in out, out)
 
     # 2d-ii. real Mac: the Apple graphics package is a Mac's alone; the Mac Pro (Late 2013) arguments go to that model alone
-    # KNOWN GAP: kit_carries refuses the Apple package for a non-Mac only when EFIKIND is already set, and preflight
-    # chooses the graphics path before it reads the startup files, so a PC with a Radeon Apple shipped is still accepted
-    # on the Apple path (earlier tests in 2c rely on it). Only the guard's presence is checked here.
-    arm("the guard that keeps the Apple package off a PC exists in kit_carries",
-        '[ "$1" = apple ] && [ -n "${EFIKIND:-}" ] && [ "$EFIKIND" != mac ] && return 1' in open(SCRIPT).read(), "")
+    # A PC whose Tahoe runs its graphics on Apple's driver is served by the same package (graphics drivers only)
+    arm("kit_carries no longer keeps the Apple package off a PC",
+        '[ "$1" = apple ] && [ -n "${EFIKIND:-}" ] && [ "$EFIKIND" != mac ] && return 1' not in open(SCRIPT).read(), "")
     arm("the kit's Apple package is selected by the graphics path for a real Mac, and the driver installer is told the machine kind",
         'case "$GFX" in apple|test) khas "driver_$GFX.dir"' in open(SCRIPT).read()
         and open(SCRIPT).read().count('GG_EFIKIND=$(is_mac_efi && echo mac || echo pc)') == 2, "")
@@ -1025,6 +1023,35 @@ echo "$me $mode $pay" >> "$data/Library/calls.log"
         rc == 0 and cm.get("Mystery.kext") == "26.99.99" and cm.get("Companion.kext") == "26.99.99"
         and "Companion.kext has no code of its own and only serves Mystery.kext" in out, out + repr(cm))
     arm("control: a codeless kext that serves a driver still on macOS 27 is left alone", cm.get("Loner.kext") == "", repr(cm))
+
+    # --- a PC on Apple's own Intel driver keeps its graphics plug-in on macOS 27; the same plug-in on an NVIDIA PC stops at 26 ---
+    def weg_pc(name):
+        f = fresh(td, name)
+        cp = os.path.join(f.efi, "EFI", "OC", "config.plist"); c = plistlib.load(open(cp, "rb"))
+        e = dict(next(k for k in c["Kernel"]["Add"] if k.get("ExecutablePath")))
+        e.update({"BundlePath": "WhateverGreen.kext", "ExecutablePath": "Contents/MacOS/WhateverGreen", "MaxKernel": "", "MinKernel": "",
+                  "Enabled": True, "Comment": "WhateverGreen.kext", "PlistPath": "Contents/Info.plist"})
+        c["Kernel"]["Add"].append(e)
+        os.makedirs(os.path.join(f.efi, "EFI", "OC", "Kexts", "WhateverGreen.kext", "Contents"), exist_ok=True)
+        plistlib.dump({"CFBundleIdentifier": "as.vit9696.WhateverGreen"}, open(os.path.join(f.efi, "EFI", "OC", "Kexts", "WhateverGreen.kext", "Contents", "Info.plist"), "wb"))
+        plistlib.dump(c, open(cp, "wb"))
+        m = json.load(open(os.path.join(f.kit_path, v3_macos27.MANIFEST)))
+        m["graphics"] = ["nvidia", "apple", "test"]; m["gfx_27"] = ["WhateverGreen.kext", "WhateverXe.kext"]
+        json.dump(m, open(os.path.join(f.kit_path, v3_macos27.MANIFEST), "w"))
+        return f
+    def staged_max(f):
+        return {k["BundlePath"]: k.get("MaxKernel", "") for k in plistlib.load(open(os.path.join(f.efi, "EFI", gg.STAGED, "config.plist"), "rb"))["Kernel"]["Add"]
+                if k.get("Enabled")}
+    IGARGS = ["--macos-major", "26", "--cpu-vendor", "GenuineIntel", "--laptop", "no", "--apple-id", "8086:3E92", "--display", "8086:3E92"]
+    wp = weg_pc("weg-apple")
+    rc, out = run("stage", wp.efi, wp.kit_path, *IGARGS)
+    mx = staged_max(wp) if rc == 0 else {}
+    arm("a PC whose Intel graphics run on Apple's driver in Tahoe keeps WhateverGreen on for macOS 27 (the carried driver attaches through it)",
+        rc == 0 and mx.get("WhateverGreen.kext") == "" and "WhateverGreen.kext was never run on macOS 27" not in out, out + repr(mx))
+    wn = weg_pc("weg-nvidia")
+    rc, out = run("stage", wn.efi, wn.kit_path, *PCARGS)
+    mx = staged_max(wn) if rc == 0 else {}
+    arm("control: on an NVIDIA PC the same WhateverGreen stops at macOS 26", rc == 0 and mx.get("WhateverGreen.kext") == "26.99.99", out + repr(mx))
 
     # --- drivers: unproven ones on by default, an off switch from macOS 26, choices that survive, a log ---
     dv = fresh(td, "drivers")

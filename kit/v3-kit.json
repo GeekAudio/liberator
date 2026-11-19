@@ -287,6 +287,11 @@
   "RealtekRTL8111.kext",
   "AtherosE2200Ethernet.kext"
  ],
+ "gfx_27": [
+  "WhateverGreen.kext",
+  "WhateverXe.kext",
+  "NootedRed.kext"
+ ],
  "laydown": {
   "dir": "laydown",
   "installer": "lay-down-27.sh"

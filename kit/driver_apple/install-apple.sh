@@ -66,9 +66,33 @@ echo "STEP checking this Mac and the package"
 # Golden Gate says whether the startup files are a real Mac's own (GG_EFIKIND=mac); a PC on AMD graphics is not served
 # by this package. --model stands in for a test.
 GIVEN=$MODEL; [ -n "$MODEL" ] || MODEL=$(sysctl -n hw.model 2>/dev/null)
-if [ "${GG_EFIKIND:-}" != mac ] && [ -z "$GIVEN" ]; then
-  die "this package is for real Macs, and Golden Gate did not find a Mac's own startup files here. Nothing was changed"; fi
-case "$MODEL" in *Mac*|Mac-*) say "a real Mac: $MODEL";; *) die "this package is for real Macs; this machine reads as '$MODEL'. Nothing was changed";; esac
+# A PC (GG_EFIKIND=pc) whose Tahoe runs its built-in graphics on Apple's driver gets that driver alone: the kit's own
+# PC path already covers the rest of a PC, so nothing else of its Tahoe is carried, and the Mac-only helpers stay off.
+PC=0
+if [ "${GG_EFIKIND:-}" = pc ]; then PC=1; say "a PC: only the graphics drivers its Tahoe runs on are carried"
+elif [ "${GG_EFIKIND:-}" != mac ] && [ -z "$GIVEN" ]; then
+  die "this package is for real Macs and PCs on Apple's graphics driver, and Golden Gate did not say which this is. Nothing was changed"; fi
+[ $PC = 1 ] || case "$MODEL" in *Mac*|Mac-*) say "a real Mac: $MODEL";; *) die "this package is for real Macs; this machine reads as '$MODEL'. Nothing was changed";; esac
+# Model class: what sits behind the keyboard, trackpad and audio (see MODELS.md), reported so a log shows it.
+# The model comes from the firmware's own board data first: a boot loader may show another model name to macOS.
+T2=0; SPI=0; REAL=$MODEL
+if [ -z "$GIVEN" ]; then
+  b=$(ioreg -rd1 -c IOPlatformExpertDevice 2>/dev/null | sed -n 's/.*"target-type" = <"\([^"]*\)">.*/\1/p;s/.*"board-id" = <"\([^"]*\)">.*/\1/p' | head -1)
+  [ -n "$b" ] && say "board data: $b"
+fi
+case "$MODEL" in
+  MacBookAir8,*|MacBookAir9,*|MacBookPro15,*|MacBookPro16,*|Macmini8,*|iMac20,*|iMacPro1,1|MacPro7,1) T2=1;;
+  MacBook8,1|MacBook9,1|MacBook10,1|MacBookPro12,1|MacBookPro13,*|MacBookPro14,*) SPI=1;;
+esac
+if [ "$GIVEN" = "" ] && [ "$T2" = 0 ]; then   # a spoofed model name must not hide a T2: look for its bridge on the PCI bus
+  ioreg -rxc IOPCIDevice 2>/dev/null | grep -qiE '"vendor-id" = <6b100000>' &&
+    ioreg -rxc IOPCIDevice 2>/dev/null | grep -qiE '"device-id" = <(01|02|03)180000>' && T2=1
+fi
+# T1 and T2 Macs are not refused: their own Tahoe already runs the drivers for what sits behind the T1/T2 chip or the SPI
+# bus (Apple's own on a Tahoe-supported Mac, the patcher's on an older one), and those are carried over below like every
+# other driver. Said here so a report shows which class the Mac is in.
+[ "$T2" = 1 ] && say "$REAL has an Apple T2 chip: its storage, keyboard, trackpad and speaker drivers come from its own Tahoe"
+[ "$SPI" = 1 ] && say "$REAL has its keyboard and trackpad on an SPI bus: those drivers come from its own Tahoe"
 [ -f "$MAN" ] || die "the package has no MANIFEST. Nothing was changed"
 while read -r kind mode sum path; do
   case "$kind" in F) [ "$(md5 -q "$P$path" 2>/dev/null)" = "$sum" ] || die "$path does not match the package's MANIFEST. Nothing was changed";; esac
@@ -90,9 +114,11 @@ kext_of() {   # the folder of the kext with bundle ID $1, in DIRS (top level and
     [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$k/Contents/Info.plist" 2>/dev/null)" = "$1" ] && { echo "$k"; return 0; }
   done; done; return 1; }
 VENDORS=""; KEXTPATHS=""; CARRY=""
-for id in $GFXIDS; do k=$(kext_of "$id") || continue; KEXTPATHS="$KEXTPATHS $k"; CARRY="$CARRY $id"
+is_gfx() { case "$1" in *Graphics*|*Framebuffer*|*AMD*|*ATI*|*Radeon*|*Accelerat*|*GPU*|*Display*|*MCCS*|*nvidia*|*NVDA*|*GeForce*) return 0;; esac; return 1; }
+for id in $GFXIDS; do [ $PC = 1 ] && ! is_gfx "$id" && continue
+  k=$(kext_of "$id") || continue; KEXTPATHS="$KEXTPATHS $k"; CARRY="$CARRY $id"
   case "$id" in *AMD*) VENDORS="$VENDORS AMD";; *AppleIntel*Graphics*|*AppleIntel*Framebuffer*) VENDORS="$VENDORS AppleIntel";; *nvidia*|*NVDA*|*GeForce*) VENDORS="$VENDORS GeForce NVDA";; esac; done
-[ -n "$CARRY" ] || die "found no driver of this Mac's Tahoe to carry over. Nothing was changed"
+[ -n "$CARRY" ] || die "found no driver of this machine's Tahoe to carry over. Nothing was changed"
 BUNDLES=""; for d in $DIRS; do for v in $(echo $VENDORS | tr ' ' '\n' | sort -u); do for b in "$d"/$v*.bundle; do [ -d "$b" ] && BUNDLES="$BUNDLES $b"; done; done; done
 say "this Mac's Tahoe: $(echo $CARRY | wc -w | tr -d ' ') drivers that macOS 27 lacks, $(echo $BUNDLES | wc -w | tr -d ' ') graphics bundles"
 [ "$MODE" = --apply ] || { echo "dry run finished; nothing was changed. Run again with --apply to install."; exit 0; }
@@ -119,6 +145,9 @@ for try in 1 2 3 4 5 6; do
   IDS=$(printf '%s\n' $IDS | grep -vxF -f <(printf '%s\n' $bad) | tr '\n' ' ')
 done
 [ -f "$WORK/aux.kc" ] || die "kmutil wrote no collection. Nothing was changed"
+# A Mac whose graphics driver was left out above would start macOS 27 with no display. Refuse rather than place it.
+printf '%s\n' $IDS | grep -qE 'Framebuffer|Graphics|AMDFramebuffer|AMD7000Controller|AMDRadeonX|NVDA|GeForce' ||
+  die "none of this Mac's graphics drivers links against macOS 27.2 (left out above), so it would start with no display. Nothing was changed"
 inside=$("$KMUTIL" inspect -A "$WORK/aux.kc" -B "$BOOTKC" -S "$SYSKC" 2>/dev/null)
 for id in $IDS; do printf '%s\n' "$inside" | grep -qF "$id" || die "linked, but $id is not in the collection. Nothing was changed"; done
 say "linked: $(stat -f %z "$WORK/aux.kc") bytes, $(echo $IDS | wc -w | tr -d ' ') extensions"
@@ -149,7 +178,11 @@ put() {   # $1 = source (file or folder), $2 = destination, $3 = mode for a file
 for b in $BUNDLES; do put "$b" "$SYS/System/Library/Extensions/${b##*/}" 755; done
 if [ "$HOOKIT" = 1 ]; then put "$WORK/libAMDIL902.dylib" "$SYS/$IL" 755; put "$P$HOOK" "$DATA$HOOK" 755; fi
 put "$P/Library/Extensions/NMXAudio.kext" "$DATA/Library/Extensions/NMXAudio.kext" 755
-for f in usr/local/libexec/nullmoth/audsel usr/local/libexec/nullmoth/netup.sh; do put "$P/$f" "$DATA/$f" 755; done
-for f in "$P"/Library/LaunchDaemons/*.plist "$P"/Library/LaunchAgents/*.plist; do put "$f" "$DATA${f#"$P"}" 644; done
+# the speaker choice and the wired-port address request are a Mac's: a PC keeps its own outputs and network setup
+for f in usr/local/libexec/nullmoth/audsel usr/local/libexec/nullmoth/netup.sh; do
+  [ $PC = 1 ] && continue; put "$P/$f" "$DATA/$f" 755; done
+for f in "$P"/Library/LaunchDaemons/*.plist "$P"/Library/LaunchAgents/*.plist; do
+  [ $PC = 1 ] && case "${f##*/}" in com.nullmoth.audsel.plist|com.nullmoth.netup.plist) continue;; esac
+  put "$f" "$DATA${f#"$P"}" 644; done
 put "$WORK/aux.kc" "$AUX" 644
 say "installed; restart into macOS 27 to finish"
