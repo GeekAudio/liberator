@@ -107,6 +107,23 @@ if [ -n "${V3I:-}" ]; then
   case "$V3I" in dry|apply) ;; *) echo "STOP --v3-install takes dry or apply"; echo "RESULT stop"; exit 2;; esac
   [ -f "${GGKIT:-}/v3-kit.json" ] || { echo "STOP macOS 27 is not offered by this build of 1401. Nothing was changed"; echo "RESULT stop"; exit 1; }
   GGS="$(dirname "$0")/nullmoth-golden-gate.sh"; [ -f "$GGS" ] || { echo "STOP this build of 1401 has no Golden Gate script"; echo "RESULT stop"; exit 1; }
+  # A Mac already on macOS 27 is updated from here: when the kit on it is not the one this build pins (an older
+  # release's), the install first gets this build's kit, from the archive in the console user's Downloads when it is
+  # there, otherwise by download. Either way it is checked against the pin. The check only says that it will.
+  GGK="$(dirname "$0")/nullmoth-v3-kit.sh"
+  if [ -f "$GGK" ] && [ "$(/bin/bash "$GGK" status 2>/dev/null | sed -n 's/^RESULT //p')" = other ]; then
+    if [ "$V3I" = apply ]; then
+      echo "STEP Getting the macOS 27 kit this build of 1401 uses"
+      ggf=""; ggu=$(stat -f %Su /dev/console 2>/dev/null)
+      ggh=$(dscl . -read "/Users/$ggu" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+      ggn=$(sed -n 's/^name //p' "$(dirname "$0")/v3-kit.pin" 2>/dev/null)
+      [ -n "$ggh" ] && [ -n "$ggn" ] && [ -f "$ggh/Downloads/$ggn" ] && [ ! -L "$ggh/Downloads/$ggn" ] && ggf="$ggh/Downloads/$ggn"
+      { if [ -n "$ggf" ]; then /bin/bash "$GGK" get --file "$ggf"; else /bin/bash "$GGK" get; fi; } | grep -v '^RESULT '
+      [ "${PIPESTATUS[0]}" = 0 ] || { echo "STOP could not get this build's macOS 27 kit. Nothing on this macOS was changed"; echo "RESULT stop"; exit 1; }
+    else
+      echo "NOTE the macOS 27 kit on this Mac is an older one; Install gets this build's kit first"
+    fi
+  fi
   if [ "$V3I" = apply ]; then /bin/bash "$GGS" local --kit "$GGKIT" --confirm; v3rc=$?; else /bin/bash "$GGS" local --kit "$GGKIT"; exit $?; fi
   [ $v3rc = 0 ] || exit $v3rc
   # The packages are on. The startup files this Mac starts macOS 27 from are renewed next, further down, once the
