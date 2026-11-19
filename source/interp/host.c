@@ -3337,6 +3337,24 @@ static int exe_arm64_only(const char *path) {
     }
     return a64 && !x86;
 }
+/* Maps the vendored arm64 libc++ as a guest image. 0 = mapped, or left native with the reason printed; 1 = the load failed. */
+static int map_guest_libcxx(uint64_t *next_slide, int trace) {
+    if (g_libcxx_guest || A2X_DBGENV("ARM2X86_NO_GUEST_LIBCXX")) return 0;
+    const char *lp = A2X_DBGENV("ARM2X86_GUEST_LIBCXX");
+    if (!lp) lp = "/usr/local/lib/arm2x86/libc++.1.0.dylib";
+    struct stat ls;
+    if (stat(lp, &ls)) {
+        fprintf(stderr, "[host] guest libc++ %s not found — libc++ stays NATIVE and std::string crossing it is "
+                        "in the wrong layout\n", lp);
+        return 0;
+    }
+    stage(ST_DEP_LOAD, (int)g_nimg, 0, lp);
+    if (load_guest(lp, *next_slide, trace, 0)) return 1;
+    *next_slide = (g_img[g_nimg - 1].vmend + 0xffffffUL) & ~0xffffffUL;
+    g_libcxx_guest = 1;
+    if (trace) fprintf(stderr, "[host] guest libc++ %s mapped as image %u\n", lp, g_nimg - 1);
+    return 0;
+}
 static int late_find(const char *path) {
     char rp[PATH_MAX];
     const char *r = realpath(path, rp) ? rp : path;
@@ -3353,7 +3371,7 @@ int a2x_late_guest_load(const char *path) {
     char rp[PATH_MAX];
     const char *use = realpath(path, rp) ? rp : path;
     if (g_nimg >= IMAGES_MAX) { fprintf(stderr, "[host] late load of %s: too many guest images\n", use); goto out; }
-    unsigned n0 = g_nimg;
+    unsigned n0 = g_nimg; int cxx0 = g_libcxx_guest;
     uint64_t ns = (g_img[g_nimg - 1].vmend + 0xffffffUL) & ~0xffffffUL;
     g_fnew = malloc(FSTARTS_MAX * sizeof *g_fnew); g_nfnew = 0;
     if (!g_fnew) goto out;
@@ -3363,9 +3381,13 @@ int a2x_late_guest_load(const char *path) {
         ns = (g_img[g_nimg - 1].vmend + 0xffffffUL) & ~0xffffffUL;
         unsigned long ndl = 0, nhard = 0; int wl = 0;
         rc = scan_deps(n0, &ns, trace, &ndl, &nhard, &wl);
+        /* A program that does not link libc++ itself can still open one that does: strings opens libLTO for a bitcode
+           file. Mapped here, before the new images bind, their libc++ imports resolve to the guest definitions instead
+           of the native x86 ones, whose std::string layout differs (SIGSEGV in basic_string::__grow_by_and_replace). */
+        if (!rc && wl && !cxx0) rc = map_guest_libcxx(&ns, trace) ? 3 : 0;
     }
     g_fs_late = 0;
-    if (rc) { fprintf(stderr, "[host] late load of %s failed (rc %d)\n", use, rc); g_nimg = n0; free(g_fnew); g_fnew = 0; goto out; }
+    if (rc) { fprintf(stderr, "[host] late load of %s failed (rc %d)\n", use, rc); g_nimg = n0; g_libcxx_guest = cxx0; free(g_fnew); g_fnew = 0; goto out; }
     /* the merged, sorted start list is built beside the live one and published with one store (see is_function_start) */
     qsort(g_fnew, g_nfnew, sizeof *g_fnew, fstart_cmp);
     {
@@ -4958,21 +4980,7 @@ int main(int argc, char **argv, char **envp) {
     /* The guest libc++ is loaded after everything else: initializers run last-loaded first, and its locale and
        iostream state must exist before any other image's initializer touches a stream. libc++abi and libunwind stay native
        (the exception runtime, and layout-identical), which is why its re-exports are not guest definitions. */
-    if (want_libcxx && !A2X_DBGENV("ARM2X86_NO_GUEST_LIBCXX")) {
-        const char *lp = A2X_DBGENV("ARM2X86_GUEST_LIBCXX");
-        if (!lp) lp = "/usr/local/lib/arm2x86/libc++.1.0.dylib";
-        struct stat ls;
-        if (stat(lp, &ls)) {
-            fprintf(stderr, "[host] guest libc++ %s not found — libc++ stays NATIVE and std::string crossing it is "
-                            "in the wrong layout\n", lp);
-        } else {
-            stage(ST_DEP_LOAD, (int)g_nimg, 0, lp);
-            if (load_guest(lp, next_slide, trace, 0)) return 3;
-            next_slide = (g_img[g_nimg - 1].vmend + 0xffffffUL) & ~0xffffffUL;
-            g_libcxx_guest = 1;
-            if (trace) fprintf(stderr, "[host] guest libc++ %s mapped as image %u\n", lp, g_nimg - 1);
-        }
-    }
+    if (want_libcxx && map_guest_libcxx(&next_slide, trace)) return 3;
 
     /* Maps' executable has 80,734 function starts. A cap of 65,536 would lose
           15,198 of them with no message, and every native->guest call into one of those would be an
