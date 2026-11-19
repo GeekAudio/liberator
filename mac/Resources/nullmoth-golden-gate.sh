@@ -88,6 +88,10 @@ ROOT=""; KIT=""; CONFIRM=0; DRVOFF=""; DRVON=""; MAJOR=""; GPUS=""; GPUS_GIVEN=0
 PCITREE=""; DISPLAYS=""; DISPLAYS_GIVEN=0; APPLEIDS=""; APPLEIDS_GIVEN=0
 DISKUTIL=/usr/sbin/diskutil; TOOLS=""
 KITMODEL=0; CPUV=""; LAPTOP=""; ACCOUNT=""
+# --startlog yes: the startup log. The macOS 27 startup files get the boot arguments that make a failed start say why (the
+# verbose screen, the platform driver's heartbeat, a power-button tap that breaks into a hung kernel). Off unless asked
+# for, and made again without it on the next stage or refresh. Never the take-the-screen argument a Mac froze on.
+STARTLOG=""; STARTLOG_ARGS="-v a2xbusydump=2 debug=0x104"
 REPORT=""; KITTAG=""   # --report yes|no: the owner's answer about start reports from macOS 27; --kit-tag: the kit's release
 # Every step's lines also go to one log on this macOS: a step that stopped can be read afterwards, Send logs takes
 # it, and the app shows its last line while a long step runs. Kept under 1 MB: past that the older half is dropped.
@@ -96,7 +100,7 @@ MODELGIVEN=""
 while [ $# -gt 0 ]; do case "$1" in
   --root) ROOT=${2:-}; shift;; --kit) KIT=${2:-}; shift;; --confirm) CONFIRM=1;; --kit-model) KITMODEL=1;;
   --bring-account) ACCOUNT=${2:-}; shift;; --size-gb) SIZE_GB=${2:-}; shift;;
-  --report) REPORT=${2:-}; shift;; --kit-tag) KITTAG=${2:-}; shift;;
+  --report) REPORT=${2:-}; shift;; --startlog) STARTLOG=${2:-}; shift;; --kit-tag) KITTAG=${2:-}; shift;;
   --off) DRVOFF=${2:-}; shift;; --on) DRVON=${2:-}; shift;;
   # test-hook-begin
   --macos-major) MAJOR=${2:-}; shift;; --gpu-id) GPUS="$GPUS ${2:-}"; GPUS_GIVEN=1; shift;; --pci-tree) PCITREE=${2:-}; shift;;
@@ -312,9 +316,29 @@ is_mac_efi() {
       /<key>BundlePath<\/key>/ { getline; b = $0 } /<key>Enabled<\/key>/ { getline; if ($0 ~ /<true\/>/ && b ~ /(VirtualSMC|FakeSMC)\.kext<\/string>/) f = 1 }
       /<\/dict>/ { b = "" } END { exit !f }'
 }
-startup_ok() {   # sets EFIKIND to 1401 or mac
+# startup_why: why the files at $EFI/OC are neither a 1401 build nor a Mac's own OpenCore files, in words the owner can
+# act on (an OpenCore Legacy Patcher config has the same place and shape as a Mac's own: this names what differs)
+startup_why() {
+  [ -d "$EFI/OC" ] || { printf '%s' "there is no OC folder in $EFI (OpenCore's files are expected at EFI/OC on this partition; if OpenCore Legacy Patcher put them on another disk's EFI partition, start from that disk or copy its EFI folder here)"; return; }
+  [ -f "$C" ] || { printf '%s' "there is no config.plist in $EFI/OC"; return; }
+  plutil -convert xml1 -o /dev/null "$C" 2>/dev/null || { printf '%s' "the config.plist in $EFI/OC cannot be read as a property list"; return; }
+  plutil -extract Kernel.Add raw -o - "$C" >/dev/null 2>&1 || { printf '%s' "the config.plist in $EFI/OC is not a whole OpenCore config (it has no Kernel > Add list)"; return; }
+  plutil -extract PlatformInfo raw -o - "$C" >/dev/null 2>&1 || { printf '%s' "the config.plist in $EFI/OC is not a whole OpenCore config (it has no PlatformInfo section)"; return; }
+  printf '%s' "the config was not recognised"
+}
+# A PC's own OpenCore files that 1401 did not build (made by hand or with another tool): a whole config that loads an
+# SMC stand-in. Testers who had one were refused and got past it by creating the .1401-build marker by hand, and the
+# rest of the run took their files as it takes a 1401 build (every setting kept, macOS 27's added), so they are taken.
+is_pc_efi() {
+  [ -f "$C" ] || return 1
+  plutil -extract Kernel.Add raw -o - "$C" >/dev/null 2>&1 || return 1
+  plutil -extract PlatformInfo raw -o - "$C" >/dev/null 2>&1 || return 1
+  ! is_mac_efi
+}
+startup_ok() {   # sets EFIKIND to 1401, mac or pc
   if is_1401_efi; then EFIKIND=1401; return 0; fi
   if is_mac_efi; then EFIKIND=mac; return 0; fi
+  if is_pc_efi; then EFIKIND=pc; return 0; fi
   return 1
 }
 nvidia_ids() {   # device IDs of the NVIDIA cards on the PCI bus, upper-case
@@ -338,11 +362,16 @@ display_ids() {  # VVVV:DDDD of every display-class PCI device (class 03), upper
     /"class-code" =/ { c = substr($2, 5, 2) }
     END { out() }' | sort -u
 }
-apple_graphics_ids() {  # VVVV:DDDD of every AMD and Intel chip a graphics driver of this macOS matches
+apple_graphics_ids() {  # VVVV:DDDD of every AMD, Intel and older NVIDIA chip a graphics driver of this macOS matches
   local k
-  for k in /System/Library/Extensions/AMD*.kext /System/Library/Extensions/AppleIntel*Graphics*.kext; do
+  # Older NVIDIA chips (Kepler: iMac14,x, MacBookPro11,3) run on Tahoe only through the NVIDIA kexts OpenCore Legacy
+  # Patcher's root patch puts back (GeForce*, NVDA*); without them in this list such a Mac had no graphics path at all
+  # and was refused, though it is a 2013+ Mac like any other.
+  for k in /System/Library/Extensions/AMD*.kext /System/Library/Extensions/AppleIntel*Graphics*.kext \
+           /System/Library/Extensions/GeForce*.kext /System/Library/Extensions/NVDA*.kext \
+           /Library/Extensions/GeForce*.kext /Library/Extensions/NVDA*.kext; do
     [ -f "$k/Contents/Info.plist" ] && plutil -p "$k/Contents/Info.plist" 2>/dev/null
-  done | grep -oE '0x[0-9A-Fa-f]{4}(1002|8086)' | awk '{ print toupper(substr($0, 7, 4) ":" substr($0, 3, 4)) }' | sort -u
+  done | grep -oE '0x[0-9A-Fa-f]{4}(1002|8086|10[dD][eE])' | awk '{ print toupper(substr($0, 7, 4) ":" substr($0, 3, 4)) }' | sort -u
 }
 kit_carries() {  # $1 = nvidia, apple or test: does this kit carry macOS 27 graphics for that path
   local n i; n=$(kv graphics) || n=""
@@ -694,7 +723,7 @@ stage_path() {
   if [ $DISPLAYS_GIVEN = 0 ] && [ $GPUS_GIVEN = 0 ]; then DISPLAYS=$(display_ids); fi
   if [ $APPLEIDS_GIVEN = 0 ] && [ $GPUS_GIVEN = 0 ]; then APPLEIDS=$(apple_graphics_ids); fi
   for d in $DISPLAYS; do d=$(upper "$d")
-    case "$d" in 1002:*|8086:*) ;; *) continue;; esac
+    case "$d" in 1002:*|8086:*) ;; 10DE:*) printf '%s\n' $APPLEIDS | grep -qx "$d" || continue;; *) continue;; esac   # NVIDIA only when a Tahoe driver here runs it
     if printf '%s\n' $APPLEIDS | tr '[:lower:]' '[:upper:]' | grep -qx "$d"; then GFX=apple; return 0; fi
     [ -n "$GFX" ] || GFX=test
   done
@@ -733,7 +762,8 @@ is_macpro6() {
 # whether they were ever run on macOS 27: on the first real Mac this let six kernel-patching kexts into the macOS 27
 # kernel, and it never reached its first service. So a limit that reaches 27 is treated like no limit at all.
 reaches_27() { case "${1%%.*}" in '') return 0;; *[!0-9]*) return 1;; esac; [ "${1%%.*}" -ge 27 ]; }
-NOT27=""; NOTABLES=0     # what apply_kit reports: kexts kept off macOS 27, and identity tables it could not write
+NOT27=""; DEP27=""; NOTABLES=0     # what apply_kit reports: kexts kept off macOS 27 (DEP27: codeless ones held with
+                                   # their driver, "kext>driver"), and identity tables it could not write
 PATCH_ON=0; PATCH_OWN=0; PATCH_OFF=0; PATCH_OFF_NAMES=""; PATCH_AMD=0   # kernel patches: carried to 27, replaced by the kit's own, left at 26
 kit_brings() { local n j; n=$(kv kexts) || return 1; j=0; while [ "$j" -lt "$n" ]; do [ "$(kv kexts.$j.name)" = "$1" ] && return 0; j=$((j + 1)); done; return 1; }
 choice_of() { [ -f "$EFI/$CHOICES" ] && [ ! -L "$EFI/$CHOICES" ] && awk -F'\t' -v k="$1" '$2 == k { v = $1 } END { print v }' "$EFI/$CHOICES"; }
@@ -773,7 +803,7 @@ drv_log() {   # one dated line in the drivers log on the startup partition; the 
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$f" 2>/dev/null && tail -n 200 "$f" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
 }
 apply_kit() {    # $1 = the OC folder to change
-  local oc=$1 n i name when pos idx have p m li j key type val parent args a added s0 u0 hex fresh k b
+  local oc=$1 n i name when pos idx have p m li j key type val parent args a added s0 u0 hex fresh k b cid c ixml capids=""
   AC="$oc/config.plist"; local kd="$oc/Kexts"
   local first="" end="" after=""
   n=$(kv kexts); i=0
@@ -932,6 +962,13 @@ EOF
     # name=value: a value the PC's own config gives that name is replaced, so the name is there once
     case "$a" in *=*) local kept="" t; for t in $args; do case "$t" in "${a%%=*}="*) [ "$t" = "$a" ] && kept="$kept $t";; *) kept="$kept $t";; esac; done; args=${kept# };; esac
     case " $args $added " in *" $a "*) ;; *) added="$added $a";; esac; j=$((j + 1)); done
+  if [ "$STARTLOG" = yes ]; then
+    for a in $STARTLOG_ARGS; do
+      case "$a" in *=*) local kept2="" t2; for t2 in $args $added; do case "$t2" in "${a%%=*}="*) ;; *) kept2="$kept2 $t2";; esac; done; args=${kept2# }; added="";; esac
+      case " $args $added " in *" $a "*) ;; *) added="$added $a";; esac
+    done
+    note "startup log: on (boot arguments: $STARTLOG_ARGS)"
+  fi
   args="$args$added"; args=${args# }
   plutil -extract "NVRAM.Add.$NV" raw -o - "$AC" >/dev/null 2>&1 || plutil -insert "NVRAM.Add.$NV" -json '{}' "$AC" || { bad "the config has no NVRAM section to set boot-args in"; return 1; }
   sets "NVRAM.Add.$NV.boot-args" "$args" || { bad "could not set boot-args"; return 1; }
@@ -998,7 +1035,26 @@ EOF
       if [ "$(cget "Kernel.Add.$i.Enabled")" = true ] && [ -n "$exe" ] && reaches_27 "$(cget "Kernel.Add.$i.MaxKernel")"; then
         case "$keep" in *" $name "*) ;; *)
           sets "Kernel.Add.$i.MaxKernel" 26.99.99 || { bad "could not limit $name"; return 1; }
-          NOT27="$NOT27 $name";; esac
+          NOT27="$NOT27 $name"
+          cid=$(plutil -extract CFBundleIdentifier raw -o - "$kd/$(cget "Kernel.Add.$i.BundlePath")/$(cget "Kernel.Add.$i.PlistPath")" 2>/dev/null) \
+            && capids="$capids $cid=$name";; esac
+      fi
+      i=$((i + 1)); done
+    # A kext with no code of its own only adds matching entries for a driver. When that driver stops at macOS 26
+    # above, the kext stops with it: a codeless I2C kext with no limit, on a laptop whose I2C driver was held at 26,
+    # matched on macOS 27 with no driver to finish it, and WindowServer waited forever for those devices to go quiet.
+    # The driver is found by its bundle identifier anywhere in the kext's Info.plist (its personalities or libraries).
+    i=0
+    while [ -n "$capids" ] && [ "$i" -lt "$n" ]; do
+      name=$(bundle_at "$i"); exe=$(cget "Kernel.Add.$i.ExecutablePath")
+      if [ "$(cget "Kernel.Add.$i.Enabled")" = true ] && [ -z "$exe" ] && reaches_27 "$(cget "Kernel.Add.$i.MaxKernel")"; then
+        case "$keep" in *" $name "*) ;; *)
+          ixml=$(plutil -convert xml1 -o - "$kd/$(cget "Kernel.Add.$i.BundlePath")/$(cget "Kernel.Add.$i.PlistPath")" 2>/dev/null) || ixml=""
+          for c in $capids; do
+            case "$ixml" in *">${c%%=*}<"*)
+              sets "Kernel.Add.$i.MaxKernel" 26.99.99 || { bad "could not limit $name"; return 1; }
+              DEP27="$DEP27 $name>${c#*=}"; break;; esac
+          done;; esac
       fi
       i=$((i + 1)); done
   fi
@@ -1087,7 +1143,7 @@ preflight)
     if [ $DISPLAYS_GIVEN = 0 ] && [ $GPUS_GIVEN = 0 ]; then DISPLAYS=$(display_ids); fi
     if [ $APPLEIDS_GIVEN = 0 ] && [ $GPUS_GIVEN = 0 ]; then APPLEIDS=$(apple_graphics_ids); fi
     for d in $DISPLAYS; do d=$(upper "$d")
-      case "$d" in 1002:*|8086:*) ;; *) continue;; esac
+      case "$d" in 1002:*|8086:*) ;; 10DE:*) printf '%s\n' $APPLEIDS | grep -qx "$d" || continue;; *) continue;; esac   # NVIDIA only when a Tahoe driver here runs it
       if printf '%s\n' $APPLEIDS | tr '[:lower:]' '[:upper:]' | grep -qx "$d"; then GFX=apple; CHIP=$d; break; fi
       [ -n "$GFX" ] || { GFX=test; CHIP=$d; }
     done
@@ -1112,8 +1168,10 @@ preflight)
   if [ -f "$C" ] && startup_ok; then
     if [ "$EFIKIND" = mac ]; then check 0 "the startup files at $EFI/OC are a Mac's own OpenCore files (not a 1401 build)"
       UNTRIED="${UNTRIED:+$UNTRIED. }macOS 27 with this kit has not been started on a real Mac yet"
+    elif [ "$EFIKIND" = pc ]; then check 0 "the startup files at $EFI/OC are this PC's own OpenCore files (not a 1401 build); every setting in them is kept"
+      UNTRIED="${UNTRIED:+$UNTRIED. }macOS 27 with this kit has not been started from OpenCore files 1401 did not build; if it does not start, build the startup files with 1401"
     else check 0 "the startup files at $EFI/OC are a 1401 build"; fi
-  else check 1 "the startup files at $EFI/OC are a 1401 build"; fi
+  else check 1 "the startup files at $EFI/OC are not a whole OpenCore config: $(startup_why)"; fi
   if [ -f "$C" ]; then
     need=$(stage_need_kb); free=$(esp_free_kb); gain=$(esp_old_logs_kb)
     if [ -n "$free" ] && [ "$free" -ge "$need" ]; then check 0 "room on the startup partition: $(( free / 1024 )) MB free, $((need / 1024)) MB needed"
@@ -1187,7 +1245,7 @@ stage)
   step "Staging the macOS 27 startup files beside the macOS 26 ones"
   state_or_stop
   [ "$ST" = none ] || stop "Golden Gate is already $ST on this partition; cancel it first to stage again"
-  startup_ok || stop "the startup files here were not made by 1401. Nothing was changed"
+  startup_ok || stop "the startup files here are not a whole OpenCore config: $(startup_why). Nothing was changed"
   need=$(stage_need_kb); free=$(esp_free_kb)
   if [ -n "$free" ] && [ "$free" -lt "$need" ]; then
     gain=$(esp_old_logs_kb)
@@ -1234,6 +1292,7 @@ stage)
   else note "model: $(plutil -extract PlatformInfo.Generic.SystemProductName raw -o - "$EFI/$STAGED/config.plist" 2>/dev/null)$([ $KITMODEL = 0 ] || echo ' (kept from the kit, as asked)')"; fi
   [ -z "$GFX" ] || note "graphics path: $GFX"
   for k in $NOT27; do note "$k was never run on macOS 27: it stays on macOS 26 and does not load on macOS 27"; done
+  for k in $DEP27; do note "${k%%>*} has no code of its own and only serves ${k#*>}, which stays on macOS 26: it stays on macOS 26 too"; done
   [ -z "$TRY27" ] || note "not proven on macOS 27 yet, and on:$TRY27. If macOS 27 does not reach its desktop, start macOS 26 and turn them off there (Drivers on macOS 27), then send the logs"
   [ -z "$OFF27" ] || note "off on macOS 27 by your choice:$OFF27"
   [ -z "$ON27" ] || note "on for macOS 27 by your choice:$ON27"
@@ -1414,7 +1473,7 @@ refresh)
   if [ -n "$want" ] && [ "$have" = "$want" ]; then ok "the macOS 27 startup files are already this kit's"; echo "RESULT ok"; exit 0; fi
   step "Making the macOS 27 startup files again from this kit"
   C="$EFI/$KEPT/config.plist"
-  startup_ok || stop "the macOS 26 startup files kept at EFI/$KEPT were not made by 1401. Nothing was changed"
+  startup_ok || stop "the macOS 26 startup files kept at EFI/$KEPT are not a whole OpenCore config. Nothing was changed"
   need=$(stage_need_kb); free=$(esp_free_kb)
   if [ -n "$free" ] && [ "$free" -lt "$need" ]; then
     gain=$(esp_old_logs_kb)

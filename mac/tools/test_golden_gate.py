@@ -269,6 +269,14 @@ with tempfile.TemporaryDirectory() as td:
         and "NOTE graphics path: apple" in out and "macOS 27 has not been started on AMD graphics with this kit yet" in out and out.count(SEND) == 1, out)
     rc, out = run("preflight", fx.efi, applek, *mac([UHD630], APPLE))
     arm("the same kit accepts a Mac whose only graphics are Intel's on Apple's driver", rc == 0 and "Intel graphics (8086:3E92), which Apple's own driver" in out and "NOTE graphics path: apple" in out, out)
+    KEPLER = "10DE:0FE9"   # GeForce GT 750M (MacBookPro11,3, iMac14,x); Tahoe runs it only through OCLP's NVIDIA kexts
+    rc, out = run("preflight", fx.efi, applek, *mac([KEPLER], APPLE + (KEPLER,)))
+    arm("a 2013+ Mac on an older NVIDIA chip a Tahoe driver here runs is accepted on the apple path, said to be untried",
+        rc == 0 and "FAIL" not in out and "NVIDIA graphics (10DE:0FE9), which Apple's own driver in this macOS runs" in out
+        and "NOTE graphics path: apple" in out, out)
+    rc, out = run("preflight", fx.efi, applek, *mac([KEPLER], APPLE))
+    arm("the same NVIDIA chip with NO driver here that runs it is still refused (no graphics path), naming what was found",
+        rc == 1 and out.count("FAIL ") == 1 and "no NVIDIA card the driver takes was found" in out and "10DE:0FE9" in out, out)
     rc, out = run("preflight", fx.efi, applek, *mac([XE], APPLE))
     arm("that kit refuses Intel graphics only a test driver runs, naming the test path", rc == 1 and out.count("FAIL ") == 1
         and "Intel graphics (8086:9A49), which 1401's test driver runs; this kit has no macOS 27 graphics for it yet (it carries: nvidia, apple)" in out, out)
@@ -337,10 +345,12 @@ with tempfile.TemporaryDirectory() as td:
         and '[ -n "${GGKITMODEL:-}" ] && echo --kit-model' not in setup_text)
     os.remove(os.path.join(fx.efi, ".1401-build"))
     rc, out = run("preflight", fx.efi, fx.kit_path, *READY)
-    arm("preflight refuses startup files 1401 did not make", rc == 1 and "FAIL the startup files" in out, out)
-    rc, out = run("stage", fx.efi, fx.kit_path)
-    arm("stage refuses them too", rc == 1 and "not made by 1401" in out, out)
-    arm("preflight and the refused stage changed nothing", {k: v for k, v in tree(fx.efi).items()} == {k: v for k, v in before.items() if k != ".1401-build"})
+    # testers with their own PC OpenCore files were refused and got past it by creating the marker by hand; the rest
+    # of the run took their files as a 1401 build, so a whole PC config without the marker is taken and said to be untried
+    arm("preflight takes a PC's own whole OpenCore files 1401 did not make, says so, and says it is untried",
+        rc == 0 and "are this PC's own OpenCore files (not a 1401 build)" in out
+        and "has not been started from OpenCore files 1401 did not build" in out, out)
+    arm("preflight changed nothing", {k: v for k, v in tree(fx.efi).items()} == {k: v for k, v in before.items() if k != ".1401-build"})
 
     # 2d. a real Mac. Its OpenCore files are not a 1401 build (OpenCore Legacy Patcher writes them); what marks
     # them as a Mac's is that no kext stands in for Apple's SMC chip. Such a config gives its kexts the limit
@@ -384,8 +394,8 @@ with tempfile.TemporaryDirectory() as td:
         and "macOS 27 with this kit has not been started on a real Mac yet" in out and "NOTE graphics path: apple" in out, out)
     pcish = real_mac("pcish", smc_on=True)
     rc, out = run("preflight", pcish.efi, mkit, *MACARGS)
-    arm("control: the same files with an SMC stand-in enabled are a PC's, and without 1401's mark they are refused",
-        rc == 1 and "FAIL the startup files" in out, out)
+    arm("control: the same files with an SMC stand-in enabled are a PC's own, not a Mac's",
+        "are this PC's own OpenCore files" in out and "a Mac's own OpenCore files" not in out, out)
     rc, out = run("stage", mac1.efi, mkit, *[a for a in MACARGS if a not in ("--disk-free-gb", "110", "--tools", TOOLS)])
     sc = plistlib.load(open(os.path.join(mac1.efi, "EFI", gg.STAGED, "config.plist"), "rb")) if rc == 0 else {"Kernel": {"Add": []}, "NVRAM": {"Add": {}}, "PlatformInfo": {"Generic": {}}}
     lim = {k["BundlePath"]: k.get("MaxKernel", "") for k in sc["Kernel"]["Add"] if k.get("Enabled")}
@@ -399,6 +409,90 @@ with tempfile.TemporaryDirectory() as td:
         "NetArm2x86IOAPIC.kext" not in lim and "A2XACPIPlatform.kext" in lim and "a2x_exec_hook.kext" in lim, repr(sorted(lim)))
     arm("what the kit marks for a PC is left out on a Mac, and the other kit arguments are added", " -vsmcbeta " not in args27 and " -no_compat_check " in args27, args27)
     arm("a real Mac keeps its own model, and is told so", sc["PlatformInfo"]["Generic"].get("SystemProductName") == "" and "NOTE model: this Mac's own (not changed)" in out, out)
+    # 2d-i. an OpenCore Legacy Patcher config is the same place and shape as any Mac's own: it is taken, and a config
+    # that is not whole (or not there at all) is refused with the reason, not with a bare "not a 1401 build"
+    def oclp_variant(name, change):
+        m = real_mac(name)
+        cp = os.path.join(m.efi, "EFI", "OC", "config.plist")
+        c = plistlib.load(open(cp, "rb"))
+        if change(m, cp, c) is not False:
+            plistlib.dump(c, open(cp, "wb"))
+        return m
+
+    def no_kernel_add(m, cp, c):
+        del c["Kernel"]["Add"]
+
+    def no_platform(m, cp, c):
+        del c["PlatformInfo"]
+
+    def garbage(m, cp, c):
+        open(cp, "wb").write(b"not a plist at all")
+        return False
+
+    def no_oc_folder(m, cp, c):
+        shutil.rmtree(os.path.join(m.efi, "EFI", "OC"))
+        return False
+
+    def no_config(m, cp, c):
+        os.remove(cp)
+        return False
+    for nm, fn, why in (("oclp-nokernel", no_kernel_add, "no Kernel > Add list"), ("oclp-noplat", no_platform, "no PlatformInfo section"),
+                        ("oclp-garbage", garbage, "cannot be read as a property list"), ("oclp-noconf", no_config, "no config.plist in"),
+                        ("oclp-nooc", no_oc_folder, "no OC folder in")):
+        mm = oclp_variant(nm, fn)
+        rc, out = run("preflight", mm.efi, mkit, *MACARGS)
+        arm(f"an OpenCore config that is not whole is refused and says why ({why})", rc == 1 and "FAIL the startup files" in out and why in out, "\n".join(l for l in out.split("\n") if "startup files" in l or "FAIL" in l or "STOP" in l))
+        rc, out = run("stage", mm.efi, mkit, *[a for a in MACARGS if a not in ("--disk-free-gb", "110", "--tools", TOOLS)])
+        arm(f"and staging it changes nothing ({why})", rc != 0 and not os.path.exists(os.path.join(mm.efi, "EFI", gg.STAGED)), out)
+    oc2 = oclp_variant("oclp-extra", lambda m, cp, c: c["Kernel"]["Add"].append(kx("Lilu.kext", "")) or c["Kernel"]["Add"].append(kx("AMFIPass.kext", "27.99.99")))
+    rc, out = run("preflight", oc2.efi, mkit, *MACARGS)
+    arm("an OpenCore Legacy Patcher config with its usual extra kexts (Lilu, AMFIPass) and no SMC stand-in is taken as a Mac's",
+        rc == 0 and "FAIL" not in out and "are a Mac's own OpenCore files" in out, out)
+    rc, out = run("preflight", pcish.efi, mkit, *MACARGS)
+    arm("a PC's own build (it loads an SMC stand-in) is taken as this PC's own, not a Mac's", rc == 0 and "are this PC's own OpenCore files" in out and "a Mac's own" not in out, out)
+
+    # 2d-ii. real Mac: the Apple graphics package is a Mac's alone; the Mac Pro (Late 2013) arguments go to that model alone
+    # KNOWN GAP: kit_carries refuses the Apple package for a non-Mac only when EFIKIND is already set, and preflight
+    # chooses the graphics path before it reads the startup files, so a PC with a Radeon Apple shipped is still accepted
+    # on the Apple path (earlier tests in 2c rely on it). Only the guard's presence is checked here.
+    arm("the guard that keeps the Apple package off a PC exists in kit_carries",
+        '[ "$1" = apple ] && [ -n "${EFIKIND:-}" ] && [ "$EFIKIND" != mac ] && return 1' in open(SCRIPT).read(), "")
+    arm("the kit's Apple package is selected by the graphics path for a real Mac, and the driver installer is told the machine kind",
+        'case "$GFX" in apple|test) khas "driver_$GFX.dir"' in open(SCRIPT).read()
+        and open(SCRIPT).read().count('GG_EFIKIND=$(is_mac_efi && echo mac || echo pc)') == 2, "")
+    base_args = json.load(open(os.path.join(fx.kit_path, v3_macos27.MANIFEST))).get("boot_args", [])
+    mp_kit = mac_kit("kit-mp6", graphics=["nvidia", "apple"], boot_args=base_args + ["a2x_pcibus=0x10010fe", "a2x_nondrv=1"],
+                     only={"nvidia": ["NetArm2x86IOAPIC.kext"], "pc": ["-vsmcbeta"], "macpro6": ["a2x_pcibus=0x10010fe", "a2x_nondrv=1"]},
+                     known_27_mac=["CatalinaIntelI210Ethernet.kext", "AppleIntelCPUPowerManagement.kext"])
+    STAGEARGS = [a for a in MACARGS if a not in ("--disk-free-gb", "110", "--tools", TOOLS)]
+
+    def staged_args(name, *more):
+        m = real_mac(name)
+        rc, out = run("stage", m.efi, mp_kit, *STAGEARGS, *more)
+        cfg = os.path.join(m.efi, "EFI", gg.STAGED, "config.plist")
+        if rc != 0 or not os.path.exists(cfg):
+            return rc, out, ""
+        c = plistlib.load(open(cfg, "rb"))
+        return rc, out, " " + " ".join(v.get("boot-args", "") for v in c["NVRAM"]["Add"].values() if isinstance(v, dict)) + " "
+    rc, out, a = staged_args("mp6-yes", "--model", "MacPro6,1")
+    arm("a Mac Pro (Late 2013) gets the bus-number arguments", rc == 0 and " a2x_pcibus=0x10010fe " in a and " a2x_nondrv=1 " in a, out + a)
+    rc, out, a = staged_args("mp6-board", "--model", "Mac-F60DEB81FF30ACF6")
+    arm("and so does the same Mac named by its board ID", rc == 0 and " a2x_pcibus=0x10010fe " in a, out + a)
+    for other in ("MacBookPro11,1", "MacPro7,1", "iMac14,2"):
+        rc, out, a = staged_args("mp6-" + other.replace(",", ""), "--model", other)
+        arm(f"{other} never gets them", rc == 0 and "a2x_pcibus" not in a and "a2x_nondrv" not in a and " -no_compat_check " in a, out + a)
+
+    # 2d-iii. the startup log (opt-in): boot arguments that make a failed start say why; off by default
+    rc, out, a = staged_args("sl-on", "--startlog", "yes")
+    arm("the startup log adds the verbose screen, the heartbeat and the break-in argument, and says so",
+        rc == 0 and " -v " in a and " a2xbusydump=2 " in a and " debug=0x104 " in a and "NOTE startup log: on" in out, out + a)
+    rc, out, a = staged_args("sl-off")
+    arm("without it none of them is added, and a2x_conlive never is", rc == 0 and " debug=0x104 " not in a and "a2xbusydump" not in a
+        and "a2x_conlive" not in a and "startup log: on" not in out, out + a)
+    rc, out, a = staged_args("sl-both", "--startlog", "yes", "--model", "MacPro6,1")
+    arm("it composes with the Mac Pro arguments and adds each name once", rc == 0 and a.count(" a2xbusydump=2 ") == 1 and " a2x_pcibus=0x10010fe " in a
+        and "a2x_conlive" not in a, out + a)
+
     # 2e. kernel patches. A patch list written for macOS 26 ends at 25.99.99, and an AMD PC does not start without
     # it. Only a patch the kit names (its bytes were found in this macOS 27 kernel, in the same functions) is carried;
     # the kit's own patch stands in for one that would hit other code; anything else keeps its limit and is named.
@@ -908,6 +1002,30 @@ echo "$me $mode $pay" >> "$data/Library/calls.log"
         and 'd=$(booted_part) || d=$(boot_esp)' in setup_all, "")
     arm("the one-button run makes no kernel collections and lays nothing down where macOS 27 is already on its volumes",
         '[ $gglaid = 1 ] || gg collections' in setup_all and 'if [ $gglaid = 1 ]; then echo "OK macOS 27 is already on its own volumes"; else gg installer' in setup_all, "")
+    # --- a kext with no code of its own stops with the driver it serves (a codeless I2C kext with no limit matched on
+    # macOS 27 after its I2C driver had been held at 26, and WindowServer waited forever on those devices) ---
+    cl = fresh(td, "codeless")
+    ccp = os.path.join(cl.efi, "EFI", "OC", "config.plist"); c0 = plistlib.load(open(ccp, "rb"))
+    base = dict(next(k for k in c0["Kernel"]["Add"] if k.get("ExecutablePath")))
+    for nm, exe, plist in (("Mystery.kext", "Contents/MacOS/Mystery", {"CFBundleIdentifier": "com.test.Mystery"}),
+                           ("Companion.kext", "", {"CFBundleIdentifier": "com.test.Companion",
+                            "IOKitPersonalities": {"pad": {"CFBundleIdentifier": "com.test.Mystery", "IOProviderClass": "IOPCIDevice"}}}),
+                           ("Loner.kext", "", {"CFBundleIdentifier": "com.test.Loner",
+                            "IOKitPersonalities": {"pad": {"CFBundleIdentifier": "com.apple.driver.AppleACPIPlatform"}}})):
+        e = dict(base); e.update({"BundlePath": nm, "ExecutablePath": exe, "MaxKernel": "", "MinKernel": "", "Enabled": True, "Comment": nm,
+                                  "PlistPath": "Contents/Info.plist"})
+        c0["Kernel"]["Add"].append(e)
+        os.makedirs(os.path.join(cl.efi, "EFI", "OC", "Kexts", nm, "Contents"), exist_ok=True)
+        plistlib.dump(plist, open(os.path.join(cl.efi, "EFI", "OC", "Kexts", nm, "Contents", "Info.plist"), "wb"))
+    plistlib.dump(c0, open(ccp, "wb"))
+    rc, out = run("stage", cl.efi, cl.kit_path, *PCARGS)
+    cm = {k["BundlePath"]: k.get("MaxKernel", "") for k in plistlib.load(open(os.path.join(cl.efi, "EFI", gg.STAGED, "config.plist"), "rb"))["Kernel"]["Add"]
+          if k.get("Enabled")} if rc == 0 else {}
+    arm("a codeless kext whose personalities name a driver held at macOS 26 is held there too, and the result says why",
+        rc == 0 and cm.get("Mystery.kext") == "26.99.99" and cm.get("Companion.kext") == "26.99.99"
+        and "Companion.kext has no code of its own and only serves Mystery.kext" in out, out + repr(cm))
+    arm("control: a codeless kext that serves a driver still on macOS 27 is left alone", cm.get("Loner.kext") == "", repr(cm))
+
     # --- drivers: unproven ones on by default, an off switch from macOS 26, choices that survive, a log ---
     dv = fresh(td, "drivers")
     def dcfg(folder="OC"):
@@ -1576,9 +1694,12 @@ arm("the card is hidden in the page as shipped and every button on it starts dis
     '<div class="pane card" id="ggcard" hidden>' in html
     and all(f'id="{b}" disabled' in html for b in ("ggprep", "gginst", "ggact", "ggfin", "ggcancel")))
 arm("the page shows the card only when the app reports a kit, and enables it only on macOS 15 or 26",
-    '$("ggcard").hidden = !m.goldenGate;' in appjs and "S.ggReady = !!m.goldenGate && OS_FROM.includes(m.major) && !why;" in appjs
+    '$("ggcard").hidden = !m.goldenGate;' in appjs and "S.ggReady = !!m.goldenGate && !ggWhy;" in appjs
+    and 'const ggWhy = (m.arch !== "x86_64" || m.translated) || !OS_FROM.includes(m.major);' in appjs
     and re.search(r"^const OS_FROM = \[15, 26\][,;]", appjs, re.M) is not None)   # the two versions live in one named list since the page became Liberator's own
 arm("the page script still never names macOS 27", "macOS 27" not in appjs)
+arm("Golden Gate is not held back by the NVIDIA card checks: a PC on AMD or Intel graphics, a laptop with its NVIDIA chip off and a real Mac reach its own preflight",
+    "&& !why;" not in appjs.split("S.ggReady")[1].split("\n")[0] and "NVIDIA" not in appjs.split("const ggWhy")[1].split("\n")[0])
 _sh = open(SCRIPT).read().splitlines()
 _bless = [i for i, ln in enumerate(_sh) if "/usr/sbin/bless " in ln and not ln.lstrip().startswith("#")]
 arm("the system's own bless is only ever reached as root with the system's own disk tool, so no test run can start it (one waited for ever)",
