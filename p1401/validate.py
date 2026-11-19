@@ -257,6 +257,35 @@ def release_archive():
     return data
 
 
+# OpenCore.efi built from the same OpenCorePkg commit the DEBUG release below was built from, plus two fixes:
+# acidanthera/OpenCorePkg#661 (AMP package count matched to CPUID capacity, for hybrid Intel CPUs) and the console
+# handle passed by value in OcConsoleLib, which otherwise hangs boot on a machine with no GOP at start. It is used only
+# when the engine downloaded exactly that release; any other OpenCore version keeps its own OpenCore.efi.
+NULLMOTH_OC_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'OpenCore-1.0.9-nullmoth.efi')
+NULLMOTH_OC_SHA256 = 'ad0bab3b93ef402d6e49abe43230c6b45083a7ec017cae90b6b0162ebc69a86d'
+NULLMOTH_OC_BASE = 'OpenCorePkg-6d8490d/OpenCore-1.0.9-DEBUG.zip'
+
+
+def _nullmoth_opencore(url):
+    """Our OpenCore.efi bytes when the release is the one it was built against and the bundled file is intact, else None."""
+    if not url or not url.endswith(NULLMOTH_OC_BASE):
+        return None
+    try:
+        with open(NULLMOTH_OC_FILE, 'rb') as stream:
+            data = stream.read()
+    except OSError:
+        return None
+    return data if hashlib.sha256(data).hexdigest() == NULLMOTH_OC_SHA256 else None
+
+
+def _expected_bytes(archive, relative, url):
+    if relative == 'EFI/OC/OpenCore.efi':
+        ours = _nullmoth_opencore(url)
+        if ours is not None:
+            return ours
+    return archive.read('X64/' + relative)
+
+
 def _release_files(efi_dir):
     """(verified release zip bytes, relative paths of the files in the built EFI that must come from it)."""
     url, expected = _opencore_release()
@@ -274,7 +303,7 @@ def _release_files(efi_dir):
         relative = 'EFI/OC/Drivers/' + driver.get('Path', '')
         if driver.get('Enabled') and 'X64/' + relative in members:
             relative_paths.append(relative)
-    return data, relative_paths
+    return data, relative_paths, url
 
 
 def describe_file(path):
@@ -301,15 +330,18 @@ def restore_release_components(efi_dir):
     "EFI/OC/OpenCore.efi differs from the verified OpenCore release" (NM-YZZJY5WJ): whatever wrote that file - the
     engine's own download cache or security software - the EFI must leave here with the release's bytes or not at all,
     so the file is replaced from the verified zip before the check, and the check still runs after."""
-    data, relative_paths = _release_files(efi_dir)
+    data, relative_paths, url = _release_files(efi_dir)
     records = []
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         for relative in relative_paths:
             path = os.path.join(efi_dir, *relative.split('/'))
-            good = archive.read('X64/' + relative)
+            good = _expected_bytes(archive, relative, url)
             if os.path.isfile(path) and _sha256(path) == hashlib.sha256(good).hexdigest():
                 continue
             found = describe_file(path) if os.path.isfile(path) else 'missing'
+            # The release's own OpenCore.efi, replaced by the fixed build on purpose: not a file something rewrote.
+            planned = (relative == 'EFI/OC/OpenCore.efi' and os.path.isfile(path)
+                       and _sha256(path) == hashlib.sha256(archive.read('X64/' + relative)).hexdigest())
             os.makedirs(os.path.dirname(path), exist_ok=True)
             tmp = path + '.1401-restore'
             with open(tmp, 'wb') as stream:
@@ -317,21 +349,21 @@ def restore_release_components(efi_dir):
             if os.path.exists(path):
                 os.chmod(path, 0o644)
             os.replace(tmp, path)
-            records.append({'tool': 'release-components', 'file': relative, 'found': found,
+            records.append({'tool': 'nullmoth-opencore' if planned else 'release-components', 'file': relative, 'found': found,
                             'restored_sha256': hashlib.sha256(good).hexdigest()})
     return records
 
 
 def release_components(efi_dir):
     """The boot files must be from the release whose validator checked the config."""
-    data, relative_paths = _release_files(efi_dir)
+    data, relative_paths, url = _release_files(efi_dir)
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         failures = []
         for relative in relative_paths:
             path = os.path.join(efi_dir, *relative.split('/'))
             if not os.path.isfile(path):
                 failures.append(relative + ' is missing from the built EFI')
-            elif _sha256(path) != hashlib.sha256(archive.read('X64/' + relative)).hexdigest():
+            elif _sha256(path) != hashlib.sha256(_expected_bytes(archive, relative, url)).hexdigest():
                 failures.append(relative + ' differs from the verified OpenCore release (' + describe_file(path)
                                 + '); rebuild the complete EFI')
     return failures

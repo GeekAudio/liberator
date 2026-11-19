@@ -74,6 +74,27 @@ def main():
     inv = validate.invariants(d)
     arm("invariants catch a Lilu plugin loading before Lilu", any("before Lilu" in f for f in inv), inv[:2])
 
+    # the fixed OpenCore.efi ships only on the release it was built from, and only while the bundled file is intact
+    import hashlib, io, zipfile  # noqa: PLC0415
+    zb = io.BytesIO()
+    with zipfile.ZipFile(zb, "w") as z:
+        z.writestr("X64/EFI/OC/OpenCore.efi", b"release-bytes")
+    base = "https://github.com/dortania/build-repo/releases/download/" + validate.NULLMOTH_OC_BASE
+    with zipfile.ZipFile(zb) as z:
+        ours = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base)
+        other = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base.replace("6d8490d", "0000000"))
+    arm("the fixed OpenCore.efi replaces the release's on its own base release",
+        hashlib.sha256(ours).hexdigest() == validate.NULLMOTH_OC_SHA256, hashlib.sha256(ours).hexdigest()[:8])
+    arm("any other OpenCore release keeps its own OpenCore.efi", other == b"release-bytes", other[:16])
+    saved = validate.NULLMOTH_OC_SHA256
+    validate.NULLMOTH_OC_SHA256 = "0" * 64
+    try:
+        with zipfile.ZipFile(zb) as z:
+            damaged = validate._expected_bytes(z, "EFI/OC/OpenCore.efi", base)
+    finally:
+        validate.NULLMOTH_OC_SHA256 = saved
+    arm("a bundled OpenCore.efi that fails its hash is not used", damaged == b"release-bytes", damaged[:16])
+
     d = _copy(FIXTURE)
     os.remove(os.path.join(d, "EFI", "BOOT", "BOOTx64.efi"))
     inv = validate.invariants(d)

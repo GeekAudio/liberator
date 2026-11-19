@@ -977,6 +977,8 @@ def build(report_path, acpi_dir, out_dir, policy=None, echo=False, download=True
                 except (validate_mod.ValidatorUnavailable, OSError) as e:
                     h.notices.append(f"Boot files could not be checked against the verified OpenCore zip before validation: {e}")
                 for r in restored:
+                    if r.get("tool") == "nullmoth-opencore":
+                        continue  # the fixed OpenCore.efi (hybrid-CPU and no-GOP boot fixes) replacing the release's, as planned
                     h.notices.append(f"{r['file']} was not the verified OpenCore release's ({r['found']}); written back from the verified zip.")
                 res.policy_changes += restored
                 res.validation = validate_mod.validate(out_dir)
