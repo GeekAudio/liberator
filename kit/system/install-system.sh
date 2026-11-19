@@ -156,7 +156,7 @@ run chown -h root:wheel "$RD"
 run chmod -h 1733 "$RD"
 if [ "$MODE" = "--apply" ]; then
   [ "$(stat -f '%u:%g %Sp' "$(r /private/var/tmp/a2x-reports)")" = "0:0 drwx-wx-wt" ] || die "a2x-reports is not root:wheel 1733"
-  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && chmod -h 600 "$rf"; done
+  for rf in "$(r /private/var/tmp/a2x-reports)"/*.log; do [ -f "$rf" ] && [ ! -L "$rf" ] && [ "$(stat -f %l "$rf")" = 1 ] && chmod -h 600 "$rf"; done   # a hard link is someone else's file
 fi
 for f in nvload.sh ws-gate.sh lw-gate.sh cryptex-place.sh start-report.sh nvgo wsready; do
   [ -f "$HERE/bringup/$f" ] || die "kit has no bringup/$f"
