@@ -30,8 +30,15 @@ PB=/usr/libexec/PlistBuddy
 say() { echo "$*"; [ -d "$STATE" ] && echo "$(date '+%F %T') $*" >> "$LOG"; }
 die() { say "STOP: $*"; exit 1; }
 run() { if [ "$MODE" = "--apply" ]; then "$@"; else echo "  would run: $*"; fi; }
+# A file this install replaces is kept, never deleted: when what is in place differs from what is placed, the copy in
+# place goes to a dated folder under /Library/NullMoth/backups first (the originals above are the files from before the
+# first install, for uninstall; these are the ones each later install replaced). The folder is named at the end.
+RUNBK=$(r /Library/NullMoth/backups)/system-$(date +%Y%m%d-%H%M%S); RUNBK_USED=0
+backup_current() { local dst=$1 src=$2 rel; [ -f "$dst" ] && [ ! -L "$dst" ] || return 0; cmp -s "$dst" "$src" && return 0
+  rel=${dst#"$SYS"}; rel=${rel#"$DATA"}; mkdir -p "$RUNBK$(dirname "$rel")" && cp -p "$dst" "$RUNBK$rel" && RUNBK_USED=1; }
 place() { local mode=$1 src=$2 dst=$3
   if [ "$MODE" != "--apply" ]; then echo "  would place: $dst"; return 0; fi
+  backup_current "$dst" "$src" || die "could not keep a copy of $dst before replacing it"
   cp "$src" "$dst.ggnew" && chown root:wheel "$dst.ggnew" && chmod "$mode" "$dst.ggnew" && mv -f "$dst.ggnew" "$dst" || { rm -f "$dst.ggnew"; die "could not place $dst"; }; }
 add() { local mode=$1 src=$2 lf=$3 d p todo="" x left
   d=$(r "$lf")
@@ -51,6 +58,7 @@ EOF
   if [ -e "$d" ] || [ -L "$d" ]; then
     if [ ! -e "$ORIG$lf" ]; then mkdir -p "$(dirname "$ORIG$lf")" && cp -p "$d" "$ORIG$lf" || die "could not keep the original of $lf"; fi
   elif ! grep -Fxq -- "$lf" "$STATE/added.list" 2>/dev/null; then echo "$lf" >> "$STATE/added.list"; fi
+  backup_current "$d" "$src" || die "could not keep a copy of $lf before replacing it"
   rm -f "$d.ggnew"
   cp -X "$src" "$d.ggnew" && chown root:wheel "$d.ggnew" && chmod "$mode" "$d.ggnew" && mv -f "$d.ggnew" "$d" || { rm -f "$d.ggnew"; die "could not place $lf"; }
   /usr/bin/xattr -c "$d" 2>/dev/null
@@ -306,5 +314,6 @@ say "applications: $want arm64 executables, $have already current, $made $([ "$M
 echo "== 5. not done by this script"
 echo "  the exec-hook kernel extension and the NVIDIA kernel extensions load through the boot loader (1401 builds that)"
 echo "  the NVIDIA driver bundle and its settings come from the driver package"
+[ "$MODE" = "--apply" ] && [ "$RUNBK_USED" = 1 ] && say "BACKUP the files this install replaced are kept in ${RUNBK#"$DATA"}"
 [ "$MODE" = "--apply" ] && say "installed; restart to finish" || echo "dry run finished; nothing was changed. Run again with --apply to install."
 

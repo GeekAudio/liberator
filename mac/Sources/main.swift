@@ -1607,6 +1607,19 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                 self.runningSetup = false
                 if cancelled { self.send("run", ["state": "cancelled", "mode": mode]) }
                 else { self.send("run", ["state": "end", "mode": mode, "ok": succeeded, "log": log.path]) }
+                // Nothing an install replaces is deleted: the scripts move what was in place to a backup folder and
+                // print a BACKUP line naming it. The user is told where, once, when the run ends.
+                let kept = text.split(separator: "\n").compactMap { line -> String? in
+                    guard let r = line.range(of: "BACKUP ") else { return nil }
+                    return String(line[r.upperBound...]).trimmingCharacters(in: .whitespaces)
+                }
+                if !cancelled && !kept.isEmpty {
+                    let a = NSAlert()
+                    a.messageText = "Your previous files are kept"
+                    a.informativeText = "Nothing this update replaced was deleted. If anything does not work as before, these copies are what was in place:\n\n" + kept.map { "• " + $0 }.joined(separator: "\n")
+                    a.addButton(withTitle: "OK")
+                    a.runModal()
+                }
             }
         }
     }

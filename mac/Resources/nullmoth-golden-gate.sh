@@ -1500,7 +1500,15 @@ refresh)
   STATE_KIT=$want
   write_state active "$(plutil -extract driver raw -o - "$EFI/$STATE" 2>/dev/null)" "$(plutil -extract driver_installer raw -o - "$EFI/$STATE" 2>/dev/null)" "$(plutil -extract system raw -o - "$EFI/$STATE" 2>/dev/null)" \
     || { rm -rf "$EFI/OC"; mv "$EFI/$RENEWED" "$EFI/OC"; rm -rf "$SCR"; stop "could not record the change; the startup files in use are back"; }
-  rm -rf "$EFI/$RENEWED" "$SCR"
+  # The startup files that were in use are kept, not deleted: they move to EFI/NullMoth-backups/OC-<date>, the two
+  # newest such folders are kept, and the folder is named to the user. A hand-made change on a Mac is never lost.
+  rm -rf "$SCR"; BK="NullMoth-backups/OC-$(date +%Y%m%d-%H%M%S)"
+  if mkdir -p "$EFI/NullMoth-backups" && mv "$EFI/$RENEWED" "$EFI/$BK"; then
+    ls -1d "$EFI"/NullMoth-backups/OC-* 2>/dev/null | sort -r | tail -n +3 | while IFS= read -r old; do rm -rf "$old"; done
+    note "BACKUP the startup files that were in use are kept at EFI/$BK on the startup partition"
+  else
+    note "BACKUP the startup files that were in use are kept at EFI/$RENEWED on the startup partition"
+  fi
   ok "the macOS 27 startup files are now this kit's; macOS 26's are still kept at EFI/$KEPT. Restart to use them"
   [ $((PATCH_ON + PATCH_OWN)) = 0 ] || note "kernel patches for macOS 27: $PATCH_ON carried as they are$([ $PATCH_OWN = 0 ] || echo ", $PATCH_OWN replaced by the kit's own")"
   [ "$PATCH_AMD" = 0 ] || note "kernel patches for macOS 27: $PATCH_AMD of the kit's own added for this AMD processor (the non-monotonic time checks)"

@@ -31,6 +31,18 @@ SHARED=/Library/GPUBundles/NVIDIAShared.bundle; AIROPT=/Library/GPUBundles/nvmtl
 say() { echo "$*"; if [ "$MODE" != dry ] && [ -d "$STATE" ]; then echo "$(date '+%F %T') $*" >> "$LOG"; fi; }
 die() { say "STOP: $*"; exit 1; }
 sum() { /sbin/md5 -q "$1" 2>/dev/null; }
+# Every file an install replaces is kept, never deleted: the copy that was in place goes to a dated folder under
+# /Library/NullMoth/backups, which the installer names at the end. (The originals kept above are the files from before
+# the first install, for uninstall; these are the ones each later install replaced.)
+RUNBK=$(r /Library/NullMoth/backups)/driver-$(date +%Y%m%d-%H%M%S); RUNBK_USED=0
+backup_current() { local d; d=$(r "$1"); [ -e "$d" ] || [ -L "$d" ] || return 0
+  mkdir -p "$RUNBK$(dirname "$1")" && cp -pP "$d" "$RUNBK$1" && RUNBK_USED=1; }
+# The NVIDIA auxiliary kernel collection is linked against one boot kernel collection and is refused at start by any
+# other. On the macOS that is running, a collection that matches the boot collection it started from is never
+# replaced by one that does not: that turns the desktop off at the next start (no NVIDIA driver, no window server).
+kc_bootid() { LC_ALL=C grep -a -A2 '<key>_BootKCID</key>' "$1" 2>/dev/null | sed -n 3p | tr -d ' \t' | base64 -D 2>/dev/null | xxd -p | tr a-f A-F; }
+booted_kcid() { /usr/sbin/sysctl -n kern.kernelcacheuuid 2>/dev/null | tr -d '-' | tr a-f A-F; }
+AUXKC=/Library/KernelCollections/AuxiliaryKernelExtensions.kc
 excluded() { case "$1" in "$SHARED"|"$SHARED"/*|"$AIROPT"|*/.NVMTLDriver.*|*/aircache/*|*/spvcache/*) return 0;; esac; return 1; }
 
 [ "$(id -u)" = 0 ] || die "run with sudo"
@@ -155,8 +167,16 @@ put() { local kind=$1 a=$2 md=$3 path=$4 d src; d=$(r "$4"); src="$FILES$4"
     E) if [ -e "$d" ]; then have=$((have+1)); return 0; fi;;
   esac
   made=$((made+1)); case "$path" in /Library/*) ndata=$((ndata+1));; *) nsys=$((nsys+1));; esac
+  if [ "$path" = "$AUXKC" ] && [ -z "$SYS" ] && [ -f "$d" ]; then
+    bk=$(booted_kcid)
+    if [ -n "$bk" ] && [ "$(kc_bootid "$d")" = "$bk" ] && [ "$(kc_bootid "$src")" != "$bk" ]; then
+      say "  kept: $d - the one in place matches the boot kernel collection this Mac started from and the kit's does not"
+      made=$((made-1)); ndata=$((ndata-1)); have=$((have+1)); return 0
+    fi
+  fi
   if [ "$MODE" != "--apply" ]; then echo "  would place: $d"; return 0; fi
   parents "$path" || die "could not make the folder for $path"
+  backup_current "$path" || die "could not keep a copy of $path before replacing it; nothing was placed there"
   keep "$path" || die "could not keep the original of $path; nothing was placed there"
   rm -f "$d.ggnew"
   case "$kind" in
@@ -166,6 +186,7 @@ put() { local kind=$1 a=$2 md=$3 path=$4 d src; d=$(r "$4"); src="$FILES$4"
   esac; }
 walk put
 say "driver files: $want listed, $have already current, $made $([ "$MODE" = "--apply" ] && echo placed || echo 'to place') ($nsys on the system volume, $ndata on the data volume)"
+[ "$MODE" = "--apply" ] && [ "$RUNBK_USED" = 1 ] && say "BACKUP the files this install replaced are kept in $RUNBK"
 
 echo "== 3. NVIDIAShared.bundle and nvmtl/air-opt are not part of this driver"
 for n in "$SHARED" "$AIROPT"; do
