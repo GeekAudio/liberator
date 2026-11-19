@@ -40,17 +40,55 @@ static const struct lsg_patch LSG[] = {
 static volatile int lsg_done, lsg_loud;
 static const char *lsg_self = "?";
 
-static int lsg_hits(const unsigned char *text, uint64_t tsize, const struct lsg_patch *pt) {
-    int nhit = 0;
-    for (const unsigned char *p = text; p + pt->n <= text + tsize; p++)
-        if (*p == pt->site[0] && !memcmp(p, pt->site, pt->n)) nhit++;
-    return nhit;
+#define LSG_N (sizeof LSG / sizeof LSG[0])
+/* One pass over __TEXT counts every site and keeps its last hit. Scanning the whole of LaunchServices once per
+ * question (7 passes on 27.2) in every guest process cost 7.3 ms of a 21 ms route launch (native true: 3.4 ms),
+ * measured over 100 launches of a true route on macOS 27.2. */
+static void lsg_census(const unsigned char *text, uint64_t tsize, int cnt[LSG_N], unsigned char *last[LSG_N]) {
+    for (size_t k = 0; k < LSG_N; k++) { cnt[k] = 0; last[k] = 0; }
+    const unsigned char *end = text + tsize;
+    for (const unsigned char *p = text; p < end; p++) {
+        unsigned char c = *p;
+        if (c != 0x84 && c != 0x85 && c != 0x41 && c != 0x83) continue;   /* the sites' first bytes; checked below too */
+        for (size_t k = 0; k < LSG_N; k++)
+            if (c == LSG[k].site[0] && p + LSG[k].n <= end && !memcmp(p, LSG[k].site, LSG[k].n)) { cnt[k]++; last[k] = (unsigned char *)p; }
+    }
+}
+/* Known LaunchServices builds: LC_UUID -> offset of each site from the image header (0 = the site is absent).
+ * An entry is written only from a full census of that exact image that found each present site exactly once,
+ * so a match plus a byte check at every offset gives the same answer as the census without reading 4 MB. */
+struct lsg_known { unsigned char uuid[16]; uint32_t at[5]; };
+static const struct lsg_known LSG_KNOWN[] = {
+#include "ls_gate_known.inc"
+};
+static int lsg_uuid(const struct mach_header_64 *mh, unsigned char out[16]) {
+    const struct load_command *lc = (const void *)(mh + 1);
+    for (uint32_t k = 0; k < mh->ncmds; k++, lc = (const void *)((const char *)lc + lc->cmdsize))
+        if (lc->cmd == LC_UUID) { memcpy(out, ((const struct uuid_command *)lc)->uuid, 16); return 1; }
+    return 0;
+}
+/* 1 = answered from the table, 0 = unknown build or any byte differs (caller runs the census) */
+static int lsg_known_in(const struct lsg_known *tab, size_t ntab, const unsigned char *img, uint64_t tsize, int cnt[LSG_N], unsigned char *last[LSG_N]) {
+    unsigned char u[16];
+    if (!lsg_uuid((const struct mach_header_64 *)img, u)) return 0;
+    for (size_t e = 0; e < ntab; e++) {
+        if (memcmp(tab[e].uuid, u, 16)) continue;
+        for (size_t k = 0; k < LSG_N; k++) {
+            uint32_t a = tab[e].at[k];
+            cnt[k] = 0; last[k] = 0;
+            if (!a) continue;
+            if (a + LSG[k].n > tsize || memcmp(img + a, LSG[k].site, LSG[k].n)) return 0;
+            cnt[k] = 1; last[k] = (unsigned char *)img + a;
+        }
+        return 1;
+    }
+    return 0;
+}
+static int lsg_known(const unsigned char *img, uint64_t tsize, int cnt[LSG_N], unsigned char *last[LSG_N]) {
+    return lsg_known_in(LSG_KNOWN, sizeof LSG_KNOWN / sizeof LSG_KNOWN[0], img, tsize, cnt, last);
 }
 /* returns 1 patched, 0 refused (site count != 1), -1 protect failed */
-static int lsg_apply(unsigned char *text, uint64_t tsize, const struct lsg_patch *pt, int writeable_test) {
-    unsigned char *hit = 0; int nhit = 0;
-    for (unsigned char *p = text; p + pt->n <= text + tsize; p++)
-        if (*p == pt->site[0] && !memcmp(p, pt->site, pt->n)) { hit = p; nhit++; }
+static int lsg_patch_at(unsigned char *hit, int nhit, const struct lsg_patch *pt, int writeable_test) {
     if (nhit != 1) {
         fprintf(stderr, "[lsgate] REFUSED %s in %s pid %d: the site matched %d times (expected 1) — nothing changed\n",
                 pt->what, lsg_self, getpid(), nhit);
@@ -84,11 +122,13 @@ static void lsg_added(const struct mach_header *mh, intptr_t slide) {
             if (lc->cmd == LC_SEGMENT_64 && !strcmp(((const struct segment_command_64 *)lc)->segname, "__TEXT")) {
                 tsize = ((const struct segment_command_64 *)lc)->vmsize; break; }
         if (!tsize) { fprintf(stderr, "[lsgate] REFUSED: no __TEXT in LaunchServices (%s)\n", lsg_self); return; }
-        for (size_t k = 0; k < sizeof LSG / sizeof LSG[0]; k++) {
+        int cnt[LSG_N]; unsigned char *last[LSG_N];
+        if (!lsg_known((const unsigned char *)ls, tsize, cnt, last)) lsg_census((const unsigned char *)ls, tsize, cnt, last);
+        for (size_t k = 0; k < LSG_N; k++) {
             /* a site with a newer-build alternate is tried only if present, so one refused line means no build matched */
-            if (k + 1 < sizeof LSG / sizeof LSG[0] && LSG[k + 1].alt && !LSG[k].alt && !lsg_hits((const unsigned char *)ls, tsize, &LSG[k])) continue;
-            if (LSG[k].alt && lsg_hits((const unsigned char *)ls, tsize, &LSG[k - 1]) == 1) continue;
-            lsg_apply((unsigned char *)ls, tsize, &LSG[k], 0);
+            if (k + 1 < LSG_N && LSG[k + 1].alt && !LSG[k].alt && !cnt[k]) continue;
+            if (LSG[k].alt && cnt[k - 1] == 1) continue;
+            lsg_patch_at(last[k], cnt[k], &LSG[k], 0);
         }
         return;
     }
@@ -106,6 +146,47 @@ void a2x_lsgate_arm(const char *gpath) {
     _dyld_register_func_for_add_image(lsg_added);
 }
 
+#if defined(LSG_SELFTEST) || defined(LSG_DUMP)
+static int lsg_apply(unsigned char *text, uint64_t tsize, const struct lsg_patch *pt, int writeable_test) {
+    int cnt[LSG_N]; unsigned char *last[LSG_N];
+    lsg_census(text, tsize, cnt, last);
+    size_t k = (size_t)(pt - LSG);
+    return lsg_patch_at(last[k], cnt[k], pt, writeable_test);
+}
+#endif
+#ifdef LSG_DUMP
+/* prints a LSG_KNOWN line for the LaunchServices loaded in this process, from a full census, or says why not */
+#include <dlfcn.h>
+int main(void) {
+    dlopen("/System/Library/Frameworks/CoreServices.framework/CoreServices", RTLD_NOW);
+    for (uint32_t i = 0, n = _dyld_image_count(); i < n; i++) {
+        const char *nm = _dyld_get_image_name(i);
+        if (!nm || !strstr(nm, "/LaunchServices.framework/Versions/A/LaunchServices")) continue;
+        const struct mach_header_64 *ls = (const void *)_dyld_get_image_header(i);
+        const struct load_command *lc = (const void *)(ls + 1); uint64_t tsize = 0;
+        for (uint32_t k = 0; k < ls->ncmds; k++, lc = (const void *)((const char *)lc + lc->cmdsize))
+            if (lc->cmd == LC_SEGMENT_64 && !strcmp(((const struct segment_command_64 *)lc)->segname, "__TEXT")) {
+                tsize = ((const struct segment_command_64 *)lc)->vmsize; break; }
+        unsigned char u[16]; int cnt[LSG_N]; unsigned char *last[LSG_N];
+        if (!tsize || !lsg_uuid(ls, u)) { printf("no __TEXT or no LC_UUID\n"); return 1; }
+        lsg_census((const unsigned char *)ls, tsize, cnt, last);
+        int bad = 0; printf("    {{");
+        for (int b = 0; b < 16; b++) printf("0x%02x%s", u[b], b < 15 ? "," : "");
+        printf("}, {");
+        for (size_t k = 0; k < LSG_N; k++) {
+            if (cnt[k] > 1) bad = 1;
+            printf("0x%x%s", cnt[k] == 1 ? (unsigned)(last[k] - (unsigned char *)ls) : 0, k + 1 < LSG_N ? "," : "");
+        }
+        printf("}},   /* %s counts", nm);
+        for (size_t k = 0; k < LSG_N; k++) printf(" %d", cnt[k]);
+        printf(" */\n");
+        int known = lsg_known((const unsigned char *)ls, tsize, cnt, last);
+        fprintf(stderr, "%s; table %s\n", bad ? "REFUSED: a site matched more than once" : "census ok", known ? "MATCHES" : "has no entry");
+        return bad;
+    }
+    printf("LaunchServices not loaded\n"); return 1;
+}
+#endif
 #ifdef LSG_SELFTEST
 /* named arms, both directions: a site present once is patched to the exact fix; twice or never is refused unchanged. */
 static int arm(const char *name, int copies, int want) {
@@ -137,6 +218,26 @@ int main(void) {
             f += !ok;
         }
         f += !(LSG[2].alt == 1 && LSG[4].alt == 1 && !LSG[1].alt && !LSG[3].alt);
+    }
+    {   /* the known-build table answers exactly what the census answers, and any doubt falls back to the census */
+        static unsigned char img[1 << 16];
+        memset(img, 0x90, sizeof img);
+        struct mach_header_64 *mh = (void *)img; mh->magic = MH_MAGIC_64; mh->ncmds = 1; mh->sizeofcmds = sizeof(struct uuid_command);
+        struct uuid_command *uc = (void *)(mh + 1); uc->cmd = LC_UUID; uc->cmdsize = sizeof *uc; memset(uc->uuid, 0x5a, 16);
+        memcpy(img + 0x1000, LSG_GATE, sizeof LSG_GATE); memcpy(img + 0x3000, LSG_M64_272, sizeof LSG_M64_272);
+        memcpy(img + 0x5000, LSG_M64E_272, sizeof LSG_M64E_272);
+        struct lsg_known t = {{0}, {0x1000, 0, 0x3000, 0, 0x5000}}; memset(t.uuid, 0x5a, 16);
+        int c1[LSG_N], c2[LSG_N]; unsigned char *l1[LSG_N], *l2[LSG_N];
+        lsg_census(img, sizeof img, c1, l1);
+        int r = lsg_known_in(&t, 1, img, sizeof img, c2, l2);
+        int same = r == 1 && !memcmp(c1, c2, sizeof c1) && !memcmp(l1, l2, sizeof l1);
+        printf("%s a known build answers exactly what the full census answers (r=%d)\n", same ? "ok  " : "FAIL", r); f += !same;
+        img[0x3000 + 3] ^= 1;
+        r = lsg_known_in(&t, 1, img, sizeof img, c2, l2);
+        printf("%s one changed byte at a known site falls back to the census (r=%d)\n", r == 0 ? "ok  " : "FAIL", r); f += r != 0;
+        img[0x3000 + 3] ^= 1; uc->uuid[0] ^= 1;
+        r = lsg_known_in(&t, 1, img, sizeof img, c2, l2);
+        printf("%s an unknown UUID falls back to the census (r=%d)\n", r == 0 ? "ok  " : "FAIL", r); f += r != 0;
     }
     printf("%d failed\n", f);
     return f != 0;

@@ -4276,6 +4276,29 @@ static long long a2x_arm64_slice_off(const uint8_t *m, size_t sz) {
     }
     return -1;
 }
+/* Read only what adopt looks at: the fat header and the bytes from the arm64 slice to the end of the file,
+      at their own offsets in a file-sized anonymous buffer (pages never read stay untouched and cost nothing).
+      Every route is fat and its x86_64 slice is this host (3.4 MB): a2x_readall copied all of it on every launch,
+      3.5 MB and 1.2 ms of a 12 ms true-route launch (100 launches on macOS 27.2). Adopt reads only the fat
+      header (a2x_arm64_slice_off) and m + soff .. end (a2x_split_blob), so those bytes are identical. */
+static void *a2x_read_armpart(int fd, size_t len) {
+    uint8_t *b = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (b == MAP_FAILED) return MAP_FAILED;
+    size_t hl = len < 4096 ? len : 4096;
+    for (size_t o = 0; o < hl; ) {
+        ssize_t r = pread(fd, b + o, hl - o, (off_t)o);
+        if (r <= 0) { munmap(b, len); return MAP_FAILED; }
+        o += (size_t)r;
+    }
+    long long so = a2x_arm64_slice_off(b, len);
+    size_t from = so > 0 && (size_t)so < len ? (size_t)so : hl;   /* thin file or no arm64 entry: read it all, as before */
+    for (size_t o = from; o < len; ) {
+        ssize_t r = pread(fd, b + o, len - o, (off_t)o);
+        if (r <= 0) { munmap(b, len); return MAP_FAILED; }
+        o += (size_t)r;
+    }
+    return b;
+}
 
 
 /* READ the guest file, never mmap(fd). The adopt half (a2x_adopt_signature) registers the app's signature
@@ -4468,7 +4491,7 @@ static void a2x_adopt_signature(const char *guest) {
         fprintf(stderr, "[host] adopt: %s is not readable as a Mach-O\n", guest);
         close(fd); return;
     }
-    uint8_t *m = a2x_readall(fd, (size_t)st.st_size);
+    uint8_t *m = a2x_read_armpart(fd, (size_t)st.st_size);
     if (m == MAP_FAILED) { fprintf(stderr, "[host] adopt: read %s: %s\n", guest, strerror(errno)); close(fd); return; }
 
     long long soff = a2x_arm64_slice_off(m, (size_t)st.st_size);
