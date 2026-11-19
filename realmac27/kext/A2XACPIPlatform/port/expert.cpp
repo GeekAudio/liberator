@@ -1339,6 +1339,18 @@ IOACPIPlatformDevice *A2XACPIPlatformExpert::makeNub(ACPI_HANDLE h, ACPI_OBJECT_
     if (cpuSlot < kA2XMaxCPUs) { nub->retain(); fCPUNub[cpuSlot] = nub; }
     nub->attachToParent(acpiParent, gIOACPIPlane);
     if (dtParent) nub->attachToParent(dtParent, gIODTPlane);
+    // acpi-path, as Apple's platform sets it on every ACPI nub ("IOACPIPlane:/_SB/PCI0@0" on a real Mac). IOPCIFamily
+    // reads it off the host bridge's provider to find the bridge's ACPI node, then pairs each PCI function with its
+    // child by _ADR (IOPCIConfigurator IOPCICopyACPIDevice / matchACPIEntry). Without it no PCI device had an ACPI
+    // node: VoodooI2C ("Could not get ACPI device for PCI provider"), backlight and _PSx power all went without.
+    // The path is read back from the plane, so IORegistryEntry::fromPath always resolves it to this nub.
+    {
+        char path[512]; int len = (int)sizeof(path);
+        if (!nub->getProperty("acpi-path") && nub->getPath(path, &len, gIOACPIPlane)) {
+            OSString *ps = OSString::withCString(path);
+            if (ps) { nub->setProperty("acpi-path", ps); ps->release(); }
+        }
+    }
     if (registered) {
         // Resources (and event vectors) are in place before any driver matches: IOService sizes a nub's
         // interrupt sources once, at its first interrupt call.
