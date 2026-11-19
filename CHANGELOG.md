@@ -20,6 +20,9 @@
 - Apple's own macOS 27 updates are not downloaded or installed by themselves, since a newer build would start without the kit's system files. Security data updates stay on (docs/UPDATES.md).
 - The Golden Gate button no longer asks for an NVIDIA card: a PC on AMD or Intel graphics, or a real Mac, can start it.
 - The interpreter's stop reports folder can be written by any program but read only by root.
+- Updating on macOS 27: open Liberator on macOS 27 and choose Install. It gets this release's kit, updates the system package, the driver and the kernel collections made by the previous kit, renews the startup files, and asks for a restart. Golden Gate is not run again.
+- Nothing an update replaces is deleted: the files that were in place are kept in /Library/NullMoth/backups (and the previous startup files in EFI/NullMoth-backups on the startup partition), and Liberator lists those folders when the update ends.
+- An update never replaces an NVIDIA kernel collection that matches this Mac's boot collection with one that does not, so a Mac whose collections were made on it keeps its graphics driver.
 - Not yet: Wi-Fi on macOS 27, and the second Spotlight cause.
 
 ## Liberator Beta 3

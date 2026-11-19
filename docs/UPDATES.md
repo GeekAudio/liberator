@@ -34,8 +34,10 @@ match that kernel's bytes. Each part refuses a different build:
 - the system installer refuses a volume whose `ProductBuildVersion` differs from the one in the kit's `BUILT-ON.txt`;
 - the driver installer refuses any build but 26B123.
 
-A new Liberator release carries a new kit; the app offers it and, on a Mac already on macOS 27, renews the startup files
-from it (`kit-current`, `refresh`).
+A new Liberator release carries a new kit. On a Mac already on macOS 27, Install in the app gets this release's kit, runs
+its system and driver installers on the running macOS (the driver installer also turns the previous kit's boot and system
+kernel collections into this kit's with two small deltas, checked against their pins), and renews the startup files.
+Everything replaced is kept in /Library/NullMoth/backups and EFI/NullMoth-backups, and the app names those folders.
 
 ## 3. macOS 27 itself (Apple's updates: 27.2.x, 27.3)
 
