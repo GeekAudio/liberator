@@ -1599,11 +1599,20 @@ echo "$me $mode" >> "@LOG@"
     arm("local refuses a kit without a system package and runs neither installer", rc == 1 and "carries no system package" in out and lines(log) == [], out)
     setup_src = (ROOT / "Resources/nullmoth-setup.sh").read_text()
     v3i = setup_src.index('if [ -n "${V3I:-}" ]; then')
+    v3end = setup_src.index('V3REFRESH=1', v3i)
     arm("setup hands a macOS 27 install to the local step only with a kit, before any disk is looked at or a package opened, and confirms only for apply",
         0 < setup_src.index('[ "$(id -u)" = 0 ] ||') < v3i < setup_src.index("driver_os_ok() {") < setup_src.index('step "Checking the driver package"')
-        and '[ -f "${GGKIT:-}/v3-kit.json" ] || { echo "STOP macOS 27 is not offered by this build of 1401. Nothing was changed"' in setup_src[v3i:v3i + 700]
-        and 'if [ "$V3I" = apply ]; then /bin/bash "$GGS" local --kit "$GGKIT" --confirm; v3rc=$?; else /bin/bash "$GGS" local --kit "$GGKIT"; exit $?; fi\n  [ $v3rc = 0 ] || exit $v3rc' in setup_src[v3i:v3i + 900]
-        and "--pkg" not in setup_src[v3i:v3i + 900] and "$PKG" not in setup_src[v3i:v3i + 900])
+        and '[ -f "${GGKIT:-}/v3-kit.json" ] || { echo "STOP macOS 27 is not offered by this build of 1401. Nothing was changed"' in setup_src[v3i:v3end]
+        and 'if [ "$V3I" = apply ]; then /bin/bash "$GGS" local --kit "$GGKIT" --confirm; v3rc=$?; else /bin/bash "$GGS" local --kit "$GGKIT"; exit $?; fi\n  [ $v3rc = 0 ] || exit $v3rc' in setup_src[v3i:v3end]
+        and "--pkg" not in setup_src[v3i:v3end] and "$PKG" not in setup_src[v3i:v3end])
+    # The macOS 27 update first gets this build's kit when the one on the Mac is another release's - only for a real
+    # install (a check only says so), only when the kit script says "other", and checked against the pin either way.
+    fetch = setup_src[v3i:v3end]
+    arm("a macOS 27 install gets this build's kit first only when the Mac's kit is another release's, and only for apply",
+        'status 2>/dev/null | sed -n \'s/^RESULT //p\')" = other ]' in fetch
+        and fetch.index('= other ]') < fetch.index('if [ "$V3I" = apply ]; then\n      echo "STEP Getting the macOS 27 kit')
+        < fetch.index('"$GGK" get --file "$ggf"') < fetch.index('/bin/bash "$GGS" local --kit "$GGKIT" --confirm')
+        and 'Install gets this build\'s kit first' in fetch)
 
     # 7b. the kit is trusted by owner and place only, and what its manifest may change is a fixed list
     for name, loosen in (("the kit folder is writable by others", lambda k: os.chmod(k, 0o757)),
