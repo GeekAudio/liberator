@@ -156,6 +156,43 @@ keep() { local d; d=$(r "$1")
   grep -Fxq -- "$1" "$ADDED" && return 0
   if [ -e "$d" ] || [ -L "$d" ]; then mkdir -p "$(dirname "$ORIG$1")" && cp -pP "$d" "$ORIG$1"; else echo "$1" >> "$ADDED"; fi; }
 
+echo "== 1b. the kernel collections"
+# A Mac already on macOS 27 has the boot and system kernel collections an earlier kit made. When they are exactly the
+# previous kit's (checked by checksum), this kit's are made from them here with bspatch and the two small deltas in
+# kc/, checked against their pins, and placed in the Preboot volume and on the system volume; the ones that were in
+# place are kept in the backup folder first. Collections that are not a kit's (made on this Mac) are left as they are.
+# The NVIDIA auxiliary collection below is matched against the boot collection the next start will use.
+KC_OLD_BOOT=4a49bffb32594d0d9287de38540dec71b6f679dbd3c3a06fb315077b624f9873; KC_NEW_BOOT=e8aadd4736a06f34b403ee256e419d673ba8d8b412e44c0fdb7df7f87acd55ca
+KC_OLD_SYS=a1b532710fd64a90cb1a505f3b594f02fab9070c2a36274e98a051bb375a8301; KC_NEW_SYS=262c64047e9058e923a2a62e9d2361667a310ad3d7ca220595ad76269ad76434
+KC_NEW_BOOTID=5CEE5ECFB3A482133CF6FA40BD3384EB; TARGET_BOOTID=""
+sha256() { /usr/bin/shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'; }
+if [ -z "$SYS" ]; then
+  G=$(diskutil info / 2>/dev/null | awk -F': *' '/APFS Volume Group/{print $2}')
+  PBK=/System/Volumes/Preboot/$G/boot/System/Library/KernelCollections; SKC=/System/Library/KernelCollections
+  if [ -n "$G" ] && [ -f "$PBK/BootKernelExtensions.kc" ]; then
+    cb=$(sha256 "$PBK/BootKernelExtensions.kc"); cs=$(sha256 "$PBK/SystemKernelExtensions.kc")
+    if [ "$cb" = "$KC_NEW_BOOT" ]; then TARGET_BOOTID=$KC_NEW_BOOTID; say "kernel collections: already this kit's"
+    elif [ "$cb" = "$KC_OLD_BOOT" ] && [ "$cs" = "$KC_OLD_SYS" ]; then
+      TARGET_BOOTID=$KC_NEW_BOOTID
+      if [ "$MODE" != "--apply" ]; then echo "  would make this kit's boot and system kernel collections and place them"
+      else
+        KT=$(mktemp -d /private/var/tmp/nmkc.XXXXXX) || die "could not make a folder for the kernel collections"
+        bspatch "$PBK/BootKernelExtensions.kc" "$KT/boot.kc" "$PKG/kc/boot-update.delta" && [ "$(sha256 "$KT/boot.kc")" = "$KC_NEW_BOOT" ] \
+          && bspatch "$PBK/SystemKernelExtensions.kc" "$KT/sys.kc" "$PKG/kc/system-update.delta" && [ "$(sha256 "$KT/sys.kc")" = "$KC_NEW_SYS" ] \
+          || { rm -rf "$KT"; die "this kit's kernel collections could not be made from the ones in place; nothing was changed"; }
+        mount | grep -q ' on / (.*read-only' && { /sbin/mount -uw / 2>/dev/null || { rm -rf "$KT"; die "the system volume could not be made writable; nothing was changed"; }; }
+        mkdir -p "$RUNBK/preboot" "$RUNBK/system" && cp -p "$PBK/BootKernelExtensions.kc" "$PBK/SystemKernelExtensions.kc" "$RUNBK/preboot/" \
+          && { [ ! -f "$SKC/BootKernelExtensions.kc" ] || cp -p "$SKC/BootKernelExtensions.kc" "$SKC/SystemKernelExtensions.kc" "$RUNBK/system/"; } && RUNBK_USED=1 \
+          || { rm -rf "$KT"; die "could not keep the kernel collections in place; nothing was changed"; }
+        kcput() { cp "$1" "$2.nmnew" && cmp -s "$1" "$2.nmnew" && mv -f "$2.nmnew" "$2" || { rm -f "$2.nmnew"; return 1; }; }
+        kcput "$KT/boot.kc" "$PBK/BootKernelExtensions.kc" && kcput "$KT/sys.kc" "$PBK/SystemKernelExtensions.kc" \
+          && { [ ! -f "$SKC/BootKernelExtensions.kc" ] || { kcput "$KT/boot.kc" "$SKC/BootKernelExtensions.kc" && kcput "$KT/sys.kc" "$SKC/SystemKernelExtensions.kc"; }; } \
+          || { cp -p "$RUNBK/preboot/"*.kc "$PBK/" 2>/dev/null; [ -f "$RUNBK/system/BootKernelExtensions.kc" ] && cp -p "$RUNBK/system/"*.kc "$SKC/" 2>/dev/null; rm -rf "$KT"; die "the kernel collections could not be placed; the ones that were in place are back"; }
+        rm -rf "$KT"; say "kernel collections: this kit's are placed (the previous ones are kept in $RUNBK)"
+      fi
+    else say "kernel collections: this Mac's are not a kit's (made on this Mac); left as they are"; fi
+  fi
+fi
 echo "== 2. the driver's files"
 want=0; have=0; made=0; nsys=0; ndata=0
 put() { local kind=$1 a=$2 md=$3 path=$4 d src; d=$(r "$4"); src="$FILES$4"
@@ -168,7 +205,7 @@ put() { local kind=$1 a=$2 md=$3 path=$4 d src; d=$(r "$4"); src="$FILES$4"
   esac
   made=$((made+1)); case "$path" in /Library/*) ndata=$((ndata+1));; *) nsys=$((nsys+1));; esac
   if [ "$path" = "$AUXKC" ] && [ -z "$SYS" ] && [ -f "$d" ]; then
-    bk=$(booted_kcid)
+    bk=${TARGET_BOOTID:-$(booted_kcid)}
     if [ -n "$bk" ] && [ "$(kc_bootid "$d")" = "$bk" ] && [ "$(kc_bootid "$src")" != "$bk" ]; then
       say "  kept: $d - the one in place matches the boot kernel collection this Mac started from and the kit's does not"
       made=$((made-1)); ndata=$((ndata-1)); have=$((have+1)); return 0
