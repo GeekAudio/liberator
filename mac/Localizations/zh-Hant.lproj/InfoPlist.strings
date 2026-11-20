@@ -1,0 +1,2 @@
+"NSRemovableVolumesUsageDescription" = "Liberator 需要讀取啟動隨身碟或磁碟上的 OpenCore 設定，以在其中設定驅動程式。";
+"NSAppleEventsUsageDescription" = "Liberator 需要系統授權才能安裝驅動程式，並在你選擇重新啟動時重新啟動這台 Mac。";

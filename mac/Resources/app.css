@@ -35,6 +35,14 @@ h1{margin:0;font:bold 32px "Times New Roman",Times,serif;color:var(--text)}
 .card p{margin:6px 0}
 .pair{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 @media (max-width:900px){.pair{grid-template-columns:minmax(0,1fr)}}
+:lang(zh) .pair{grid-template-columns:repeat(auto-fit,minmax(min(100%,690px),1fr))}
+.chinese-prose .sentence,.chinese-prose .phrase,.chinese-prose .text-unit{
+  display:inline-block;max-inline-size:100%;vertical-align:baseline;overflow-wrap:anywhere
+}
+.chinese-prose a,.chinese-prose b,.chinese-prose .tech-value{
+  display:inline-block;max-inline-size:100%;overflow-wrap:anywhere
+}
+:lang(zh) button{max-inline-size:100%;overflow-wrap:anywhere}
 .sh{margin:0 0 4px!important;font:bold 12px "Courier New",Courier,monospace;letter-spacing:1px;text-transform:uppercase;color:var(--label)}
 .row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .row label{display:flex;align-items:center;gap:6px;min-height:36px}
@@ -60,6 +68,8 @@ table.ports th{width:auto;border-radius:0}table.ports td{border-radius:0}
 .todo li{margin:0 0 10px}
 .todo li.done b::after{content:"  [done]";color:var(--good);font:bold 11px "Courier New",Courier,monospace}
 .todo li.now b{color:var(--label)}
+.todo .good{white-space:nowrap}
+:lang(zh) .todo li.done b::after{content:"  [已完成]"}
 #log{margin:0;height:220px;overflow:auto;padding:10px;border-radius:12px;background:var(--ink);box-shadow:inset 0 0 0 1px var(--line);color:var(--soft);font:12px/1.35 "Courier New",Courier,monospace;white-space:pre-wrap}
 #log .c{color:var(--warn)}#log .k{color:var(--good)}#log .x{color:var(--bad);font-weight:bold}#log .s{color:var(--text);font-weight:bold}
 #odr{white-space:pre-line}
@@ -75,3 +85,18 @@ table.ports th{width:auto;border-radius:0}table.ports td{border-radius:0}
 .ggbar{height:14px;margin:12px 0 4px;border-radius:999px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line);overflow:hidden}
 .ggbar>div{height:100%;width:0;background:var(--fill);border-radius:999px;box-shadow:inset 0 1px 0 rgba(255,255,255,.5);transition:width .6s ease}
 .ggbart{margin:0;color:var(--muted)}
+
+:root:lang(zh-Hans){--chinese-font:"PingFang SC",-apple-system,sans-serif}
+:root:lang(zh-Hant){--chinese-font:"PingFang TC",-apple-system,sans-serif}
+:lang(zh) :is(.desk,.nav,.b,select,h1,.sh,table.pc th,table.pc caption){
+  font-family:var(--chinese-font)
+}
+:lang(zh) .desk{line-height:1.6}
+:lang(zh) h1{font-weight:600;line-height:1.25}
+:lang(zh) :is(.sh,table.pc th,table.pc caption){
+  font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:none
+}
+:lang(zh) :is(#log,#efiout .now,.count),
+:lang(zh) .todo li.done b::after{
+  font-family:"SF Mono",Menlo,var(--chinese-font)
+}

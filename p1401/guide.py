@@ -463,7 +463,7 @@ def app_html(report, steps, macos="", mark=None, uid="g", prerequisites=False):
 <p><a href="#{uid}">{_inline(loc.t("Back to the top"))}</a></p>
 <p class="badges" aria-hidden="true"><span class="bd bd1">NullMoth</span><span class="bd bd2">{_inline(loc.t("VIEWABLE WITH"))}<br>{_inline(loc.t("ANY BROWSER"))}</span><span class="bd bd3">{_inline(loc.t("NO COOKIES"))}<br>{_inline(loc.t("NO TRACKING"))}</span><span class="bd bd4">{_inline(loc.t("FREE"))}<br>{_inline(loc.t("FOREVER"))}</span></p>
 <p class="counter">{_inline(loc.t("You are visitor number "))}<b>000001</b>{_inline(loc.t(" (it's only ever you &mdash; this page never left this PC)"))}</p>
-<p>{_inline(loc.t("© 2026 NullMoth Systems"))}<br>{_inline(loc.t("NullMoth and the moth logo are trademarks of NullMoth Systems."))}</p>
+<p>{_inline(loc.t("Community build maintained by GeekAudio."))}</p>
 <p class="present">{_inline(loc.t("Present day. Present time."))}</p>
 </center>
 </div>'''
@@ -616,10 +616,10 @@ def selftest():
     arm("every step is a page and every page shows without script (none starts hidden)",
         all(pages[m].count('<section class="pg"') == len(build_guide(reports[m], configs.get(m, {}))) for m in good)
         and not any(re.search(r'<section class="pg"[^>]*\bhidden', pages[m]) for m in good), "all")
-    # The visible text should name the app and NullMoth Systems.
+    # The visible text identifies the app and the downstream maintainer.
     shown = {m: re.sub(r"<style>.*?</style>|<script>.*?</script>|<[^>]+>", " ", pages[m], flags=re.S) for m in good}
-    unnamed = [m for m in good if not ("1401 app" in shown[m] and "NullMoth Systems" in shown[m])]
-    arm("the page names the app (1401) and its maker (NullMoth Systems)", not unnamed, unnamed or "all")
+    unnamed = [m for m in good if not ("1401 app" in shown[m] and "GeekAudio" in shown[m])]
+    arm("the page names the app (1401) and downstream maintainer (GeekAudio)", not unnamed, unnamed or "all")
     bare = render_html(reports["dell-e7470"], build_guide(reports["dell-e7470"], configs.get("dell-e7470", {})), mark=b"")
     unmarked = [m for m in good if 'class="mark" src="data:image/jpeg;base64,' not in pages[m]]
     arm("every page carries the NullMoth mark from the repo by default, and the check fires on a page without it",

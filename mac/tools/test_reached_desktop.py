@@ -85,7 +85,7 @@ arm("display modes come from CoreGraphics (size and refresh rate per active disp
 # the install flow asks once, defaults to not sending, and arms only a successful install the user agreed to
 runf = main.split("func run(mode:", 1)[1]
 arm("the install flow asks for consent and defaults to not sending",
-    "reachedDesktopConsent" in runf and 'addButton(withTitle: "Send once after it boots")' in runf
+    "reachedDesktopConsent" in runf and 'addButton(withTitle: L10n.text("Send once after it boots"))' in runf
     and "a.runModal() == .alertFirstButtonReturn" in runf)
 arm("it is armed only when a real install succeeded and the user agreed",
     "ReachedDesktop.arm(consent: succeeded && reachedDesktopConsent)" in runf)

@@ -1,0 +1,2 @@
+"NSRemovableVolumesUsageDescription" = "Liberator 需要读取启动 U 盘或磁盘上的 OpenCore 配置，以在其中配置驱动。";
+"NSAppleEventsUsageDescription" = "Liberator 需要系统授权才能安装驱动，并在你选择重启时重新启动这台 Mac。";

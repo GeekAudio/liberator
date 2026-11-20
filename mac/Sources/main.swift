@@ -438,6 +438,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
            let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { table = j }
         let cfg = WKWebViewConfiguration()
         cfg.userContentController.add(self, name: "nm")
+        cfg.userContentController.addUserScript(WKUserScript(
+            source: "window.liberatorLocalization = " + json(["language": L10n.language, "strings": L10n.strings]),
+            injectionTime: .atDocumentStart, forMainFrameOnly: true))
         web = WKWebView(frame: .zero, configuration: cfg)
         web.uiDelegate = self
         web.setValue(false, forKey: "drawsBackground")
@@ -445,7 +448,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         // buttons sit on it; the strip below keeps the window draggable, since the web view takes every click.
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 760),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "Liberator"; window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
+        window.title = "Liberator ZH"; window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
         window.minSize = NSSize(width: 960, height: 620)
         window.backgroundColor = .black
         window.contentView = TitleBar.container(web: web, size: window.contentRect(forFrameRect: window.frame).size)
@@ -457,7 +460,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { true }
 
     func webView(_ w: WKWebView, runJavaScriptConfirmPanelWithMessage m: String, initiatedByFrame f: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
-        let a = NSAlert(); a.messageText = m; a.addButton(withTitle: "OK"); a.addButton(withTitle: "Cancel")
+        let a = NSAlert(); a.messageText = m; a.addButton(withTitle: L10n.text("OK")); a.addButton(withTitle: L10n.text("Cancel"))
         completionHandler(a.runModal() == .alertFirstButtonReturn)
     }
 
@@ -560,13 +563,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                 // The one button: everything from the kit to the switch of startup files, in one run. The switch is
                 // the only step that changes how this Mac starts, so the user is asked once, before anything runs.
                 let a = NSAlert()
-                a.messageText = "Prepare this Mac for macOS 27 and start from its startup files?"
-                a.informativeText = "Liberator downloads what it needs (about 27 GB), puts macOS 27 on its own new volumes beside the macOS you use now, sets it up, and then makes the macOS 27 startup files the default. This takes a while. Your current macOS and its startup files are kept, and Cancel Golden Gate puts them back. Keep your 1401 USB stick."
+                a.messageText = L10n.text("Prepare this Mac for macOS 27 and start from its startup files?")
+                a.informativeText = L10n.text("Liberator downloads what it needs (about 27 GB), puts macOS 27 on its own new volumes beside the macOS you use now, sets it up, and then makes the macOS 27 startup files the default. This takes a while. Your current macOS and its startup files are kept, and Cancel Golden Gate puts them back. Keep your 1401 USB stick.")
                 // The page's default is to bring this account over; its tick box asks for a new Mac instead.
                 let bring = b["bringAccount"] as? Bool == true
-                a.informativeText += bring ? "\n\nmacOS 27 will start with your account brought over." : "\n\nmacOS 27 will start at Apple's setup like a new Mac."
-                if let gb = GoldenGate.sizeArgs(b["sizeGB"]).last { a.informativeText += "\n\nmacOS 27 may use up to \(gb) GB of this disk." }
-                a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Prepare for Golden Gate")
+                a.informativeText += bring ? L10n.text("\n\nmacOS 27 will start with your account brought over.") : L10n.text("\n\nmacOS 27 will start at Apple's setup like a new Mac.")
+                if let gb = GoldenGate.sizeArgs(b["sizeGB"]).last { a.informativeText += L10n.format("\n\nmacOS 27 may use up to %@ GB of this disk.", gb) }
+                a.addButton(withTitle: L10n.text("Cancel")); a.addButton(withTitle: L10n.text("Prepare for Golden Gate"))
                 guard a.runModal() == .alertSecondButtonReturn else { send("run", ["state": "cancelled", "mode": "goldengate"]); break }
                 extra.append("--confirm")
                 if bring { extra += ["--bring-account", NSUserName()] }
@@ -576,9 +579,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                 // quiet. It is opt-in and the default is not to send; with a yes, setup leaves the answer on the
                 // macOS 27 volume and the kit's start reporter sends from there (bringup/start-report.sh in the kit).
                 let r = NSAlert()
-                r.messageText = "Tell NullMoth how macOS 27 starts on this PC?"
-                r.informativeText = "After macOS 27 first reaches its desktop, it can send one small summary to nullmothsystems.com - the macOS version, this PC's model and processor, the graphics cards, whether the display and the driver came up, and how long the start took. If a start does not reach the desktop, the next start can send that start's own display and driver log lines, at most three times. Names, serial numbers and addresses are taken out. Nothing else is collected and nothing is sent later."
-                r.addButton(withTitle: "Send"); r.addButton(withTitle: "Don't send")
+                r.messageText = L10n.text("Tell NullMoth how macOS 27 starts on this PC?")
+                r.informativeText = L10n.text("After macOS 27 first reaches its desktop, it can send one small summary to nullmothsystems.com - the macOS version, this PC's model and processor, the graphics cards, whether the display and the driver came up, and how long the start took. If a start does not reach the desktop, the next start can send that start's own display and driver log lines, at most three times. Names, serial numbers and addresses are taken out. Nothing else is collected and nothing is sent later.")
+                r.addButton(withTitle: L10n.text("Send")); r.addButton(withTitle: L10n.text("Don't send"))
                 if r.runModal() == .alertFirstButtonReturn { extra.append("--report-consent") }
                 // An archive of this build's kit that is already in Downloads is used instead of downloading it again;
                 // setup checks it against the pin either way.
@@ -590,7 +593,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
             if step == "kit" {
                 // The kit is downloaded, or taken from an archive the user already has; setup checks it the same either way.
                 if b["file"] as? Bool == true {
-                    let panel = NSOpenPanel(); panel.title = "Choose the macOS 27 support archive"
+                    let panel = NSOpenPanel(); panel.title = L10n.text("Choose the macOS 27 support archive")
                     panel.canChooseDirectories = false; panel.allowsMultipleSelection = false
                     guard panel.runModal() == .OK, let u = panel.url else { send("run", ["state": "cancelled", "mode": "goldengate"]); break }
                     extra += ["--v3-kit-file", u.path]
@@ -600,28 +603,28 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
             if step == "remove" {
                 // Takes macOS 27 and everything on its volumes away: only on an explicit yes.
                 let a = NSAlert(); a.alertStyle = .critical
-                a.messageText = "Remove macOS 27 from this Mac?"
-                a.informativeText = "This puts the startup files back as they were before Golden Gate and erases the macOS 27 that Liberator put on this Mac, with everything saved inside it: its files, apps, accounts and settings. It cannot be undone. The macOS you are using now is not touched.\n\nThe downloads are kept, so preparing again does not download again."
-                a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Remove macOS 27")
+                a.messageText = L10n.text("Remove macOS 27 from this Mac?")
+                a.informativeText = L10n.text("This puts the startup files back as they were before Golden Gate and erases the macOS 27 that Liberator put on this Mac, with everything saved inside it: its files, apps, accounts and settings. It cannot be undone. The macOS you are using now is not touched.\n\nThe downloads are kept, so preparing again does not download again.")
+                a.addButton(withTitle: L10n.text("Cancel")); a.addButton(withTitle: L10n.text("Remove macOS 27"))
                 guard a.runModal() == .alertSecondButtonReturn else { send("run", ["state": "cancelled", "mode": "goldengate"]); break }
                 extra.append("--confirm")
             }
             if step == "clear-downloads" {
                 let a = NSAlert()
-                a.messageText = "Clear the Golden Gate downloads?"
-                a.informativeText = "Liberator keeps what it downloaded for macOS 27 (about 27 GB) so that another try does not download it again. Clearing frees that space; the next Prepare for Golden Gate downloads it again. A macOS 27 that is already installed is not affected."
-                a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Clear downloads")
+                a.messageText = L10n.text("Clear the Golden Gate downloads?")
+                a.informativeText = L10n.text("Liberator keeps what it downloaded for macOS 27 (about 27 GB) so that another try does not download it again. Clearing frees that space; the next Prepare for Golden Gate downloads it again. A macOS 27 that is already installed is not affected.")
+                a.addButton(withTitle: L10n.text("Cancel")); a.addButton(withTitle: L10n.text("Clear downloads"))
                 guard a.runModal() == .alertSecondButtonReturn else { send("run", ["state": "cancelled", "mode": "goldengate"]); break }
                 extra.append("--confirm")
             }
             if step == "drivers-off" || step == "drivers-on" {
                 let off = step == "drivers-off"
                 let a = NSAlert()
-                a.messageText = off ? "Turn off the unproven drivers for macOS 27?" : "Turn the drivers back on for macOS 27?"
+                a.messageText = off ? L10n.text("Turn off the unproven drivers for macOS 27?") : L10n.text("Turn the drivers back on for macOS 27?")
                 a.informativeText = off
-                    ? "Some of this PC's own drivers (keyboard, trackpad, battery and the like) load on macOS 27 without having been proven there. If macOS 27 did not reach its desktop, one of them may be the reason. This turns them off for macOS 27 only; they keep working on the macOS you are using now. Afterwards press Send logs, so the driver can be fixed."
-                    : "This takes back every driver you turned off for macOS 27. They load there again at the next start."
-                a.addButton(withTitle: "Cancel"); a.addButton(withTitle: off ? "Turn them off" : "Turn them on")
+                    ? L10n.text("Some of this PC's own drivers (keyboard, trackpad, battery and the like) load on macOS 27 without having been proven there. If macOS 27 did not reach its desktop, one of them may be the reason. This turns them off for macOS 27 only; they keep working on the macOS you are using now. Afterwards press Send logs, so the driver can be fixed.")
+                    : L10n.text("This takes back every driver you turned off for macOS 27. They load there again at the next start.")
+                a.addButton(withTitle: L10n.text("Cancel")); a.addButton(withTitle: off ? L10n.text("Turn off drivers") : L10n.text("Turn on drivers"))
                 guard a.runModal() == .alertSecondButtonReturn else { send("run", ["state": "cancelled", "mode": "goldengate"]); break }
                 extra.append("--confirm")
             }
@@ -633,9 +636,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
             if step == "activate" {
                 // The one step that changes how this Mac starts: it runs only on an explicit yes.
                 let a = NSAlert()
-                a.messageText = "Start this Mac from the macOS 27 startup files?"
-                a.informativeText = "The macOS 26 startup files are kept beside them, and Cancel Golden Gate (from macOS 26) puts them back. Keep your OpenCore USB stick: it still starts macOS 26 if the new files do not."
-                a.addButton(withTitle: "Cancel"); a.addButton(withTitle: "Use the macOS 27 files")
+                a.messageText = L10n.text("Start this Mac from the macOS 27 startup files?")
+                a.informativeText = L10n.text("The macOS 26 startup files are kept beside them, and Cancel Golden Gate (from macOS 26) puts them back. Keep your OpenCore USB stick: it still starts macOS 26 if the new files do not.")
+                a.addButton(withTitle: L10n.text("Cancel")); a.addButton(withTitle: L10n.text("Use the macOS 27 files"))
                 guard a.runModal() == .alertSecondButtonReturn else {
                     send("run", ["state": "cancelled", "mode": "goldengate"]); break
                 }
@@ -769,8 +772,8 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.applicationBundle]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.prompt = "Allow"
-        panel.message = "Pick the app that should use the microphone, camera and screen recording"
+        panel.prompt = L10n.text("Allow")
+        panel.message = L10n.text("Pick the app that should use the microphone, camera and screen recording")
         guard panel.runModal() == .OK, let app = panel.url else { send("tccStatus", ["text": ""]); return }
         DispatchQueue.global(qos: .userInitiated).async {
             let r = App.runBounded(Bundle.main.resourceURL!.appendingPathComponent("nullmoth-tcc-grant"), [app.path], seconds: 20)
@@ -779,10 +782,13 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
             let text: String
             if j["ok"] as? Bool == true {
                 let failed = (j["failed"] as? [String] ?? []).map { $0.replacingOccurrences(of: "kTCCService", with: "") }
-                text = "\(name) may now use the microphone and camera" + (failed.isEmpty ? " and record the screen." : " (not: \(failed.joined(separator: ", "))).")
-                    + " Quit and reopen \(name) if it is running."
+                text = (failed.isEmpty
+                    ? L10n.format("%@ may now use the microphone and camera and record the screen.", name)
+                    : L10n.format("%@ may now use the microphone and camera (not: %@).", name, failed.joined(separator: ", ")))
+                    + L10n.format(" Quit and reopen %@ if it is running.", name)
             } else {
-                text = "Could not allow \(name): \(j["why"] as? String ?? (r.timedOut ? "the helper did not answer" : "macOS refused the change"))."
+                let reason = j["why"] as? String ?? (r.timedOut ? "the helper did not answer" : "macOS refused the change")
+                text = L10n.format("Could not allow %@: %@.", name, L10n.text(reason))
             }
             DispatchQueue.main.async { self.send("tccStatus", ["text": text, "ok": j["ok"] as? Bool ?? false]) }
         }
@@ -797,7 +803,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                                       "date": ISO8601DateFormatter().string(from: Date())]
             let tests = ["identity", "correct", "bench", "corpus"]
             for (i, t) in tests.enumerated() {
-                DispatchQueue.main.async { self.send("gpumapStatus", ["text": "Measuring (\(i + 1) of \(tests.count + 1)): \(t)..."]) }
+                DispatchQueue.main.async { self.send("gpumapStatus", ["text": L10n.format("Measuring (%@ of %@): %@...", String(i + 1), String(tests.count + 1), L10n.text(t))]) }
                 let r = App.runBounded(res.appendingPathComponent("nullmoth-gpumap"), [t], seconds: 90)
                 var entry: [String: Any] = ["exit": Int(r.status), "timedOut": r.timedOut]
                 if let j = try? JSONSerialization.jsonObject(with: r.out) as? [String: Any] { entry["result"] = j }
@@ -819,7 +825,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                 ok = (try? d.write(to: file, options: .atomic)) != nil
             }
             DispatchQueue.main.async {
-                self.send("gpumapStatus", ["text": ok ? "Done. Saved \(file.lastPathComponent); Send logs uploads it." : "Could not save the result.", "done": true])
+                self.send("gpumapStatus", ["text": ok ? L10n.format("Done. Saved %@; Send logs uploads it.", file.lastPathComponent) : "Could not save the result.", "done": true])
                 if ok { self.sendLogs() }
             }
         }
@@ -1032,10 +1038,10 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         if runningSetup { send("dl", ["state": "error", "why": "setup is still running; try again when it has finished"]); return }
         let alert = NSAlert()
         alert.icon = NSApplication.shared.applicationIconImage
-        alert.messageText = "Download a driver, or choose a driver file from your Mac."
-        alert.addButton(withTitle: "Download Driver")
-        alert.addButton(withTitle: "Choose Driver File…")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = L10n.text("Download a driver, or choose a driver file from your Mac.")
+        alert.addButton(withTitle: L10n.text("Download Driver"))
+        alert.addButton(withTitle: L10n.text("Choose Driver File…"))
+        alert.addButton(withTitle: L10n.text("Cancel"))
         alert.beginSheetModal(for: window) { response in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [unowned self] in
                 switch response {
@@ -1057,9 +1063,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.zip, .gzip]
-        panel.title = "Choose a Driver File"
-        panel.message = "Select a driver file to install."
-        panel.prompt = "Choose"
+        panel.title = L10n.text("Choose a Driver File")
+        panel.message = L10n.text("Select a driver file to install.")
+        panel.prompt = L10n.text("Choose")
         panel.beginSheetModal(for: window) { [unowned self] response in
             guard response == .OK, let url = panel.url else {
                 cancelUpdateDriver()
@@ -1127,6 +1133,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
     func updateApp() {
         let fail: (String) -> Void = { self.send("appupd", ["state": "error", "why": $0]) }
         guard let l = latestApp else { return fail("check for updates first") }
+        let alert = NSAlert()
+        alert.messageText = L10n.text("Install the official Liberator update?")
+        alert.informativeText = L10n.text("The official update replaces this app with the upstream build, which may not include these Chinese translations.")
+        alert.addButton(withTitle: L10n.text("Cancel"))
+        alert.addButton(withTitle: L10n.text("Install official update"))
+        guard alert.runModal() == .alertSecondButtonReturn else { return fail("App update cancelled.") }
         let me = Bundle.main.bundleURL, parent = me.deletingLastPathComponent()
         guard me.pathExtension == "app", FileManager.default.isWritableFile(atPath: parent.path) else {
             return fail("Liberator cannot replace itself in \(parent.path); move it to Applications, or download the new version from the site") }
@@ -1154,7 +1166,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
             _ = sh("/usr/bin/ditto", ["-x", "-k", zip.path, out.path])
             guard let new = (try? FileManager.default.contentsOfDirectory(at: out, includingPropertiesForKeys: nil))?.first(where: { $0.pathExtension == "app" }),
                   let info = NSDictionary(contentsOf: new.appendingPathComponent("Contents/Info.plist")),
-                  info["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
+                  info["CFBundleIdentifier"] as? String == "com.nullmoth.liberator",
                   info["CFBundleShortVersionString"] as? String == l.version else { return fail("the download is not the Liberator \(l.version) app") }
             let v = Process(); v.executableURL = URL(fileURLWithPath: "/usr/bin/codesign"); v.arguments = ["--verify", "--deep", new.path]
             v.standardOutput = Pipe(); v.standardError = Pipe()
@@ -1275,12 +1287,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         send("diagnosticsStatus", ["text": "Checking availability. No trace starts."])
         DispatchQueue.global().async {
             let receipt = OptionalDiagnostics.prerequisites(executable: resources.appendingPathComponent("nullmoth-diagnostics-preflight"), targetPID: getpid())
-            self.send("diagnosticsStatus", ["text": OptionalDiagnostics.guidance(receipt)])
+            self.send("diagnosticsStatus", ["text": OptionalDiagnostics.guidance(receipt).components(separatedBy: "\n\n").map(L10n.text).joined(separator: "\n\n")])
         }
     }
 
     func importDiagnosticReceipt() {
-        let panel = NSOpenPanel(); panel.title = "Choose a saved diagnostics receipt"
+        let panel = NSOpenPanel(); panel.title = L10n.text("Choose a saved diagnostics receipt")
         panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -1304,12 +1316,12 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
     func sendLogs(sample: String = "") {
         guard ["", "flicker"].contains(sample) else { return }
         let a = NSAlert()
-        a.messageText = sample == "flicker" ? "Record the flicker and send it to NullMoth" : "Send logs to NullMoth"
-        a.informativeText = "Liberator is sending this Mac's NullMoth logs to nullmothsystems.com so the problem can be found and fixed: what Liberator did, the driver's state, driver crash reports, recent WindowServer, Firefox and Blender crash reports, update diagnostics, OpenCore's startup logs, and a numeric device/CPU relationship map. A separately imported diagnostics receipt is included only if that session allowed upload, and only as a validated count/configuration summary. The map records kernel-visible hardware, not verified driver support. Your name, your Mac's name, serial numbers and addresses are removed first. macOS asks for your password so 1401 can read the startup logs."
+        a.messageText = sample == "flicker" ? L10n.text("Record the flicker and send it to NullMoth") : L10n.text("Send logs to NullMoth")
+        a.informativeText = L10n.text("Liberator is sending this Mac's NullMoth logs to nullmothsystems.com so the problem can be found and fixed: what Liberator did, the driver's state, driver crash reports, recent WindowServer, Firefox and Blender crash reports, update diagnostics, OpenCore's startup logs, and a numeric device/CPU relationship map. A separately imported diagnostics receipt is included only if that session allowed upload, and only as a validated count/configuration summary. The map records kernel-visible hardware, not verified driver support. Your name, your Mac's name, serial numbers and addresses are removed first. macOS asks for your password so 1401 can read the startup logs.")
         if sample == "flicker" {
-            a.informativeText = "Start this while the screen is flickering. For 20 seconds Liberator records how the driver puts frames on the display (flip counts and timing, refused updates, the refresh rate and WindowServer's load), then sends it with the ordinary logs. Keep using the Mac normally while it records.\n\n" + a.informativeText
+            a.informativeText = L10n.text("Start this while the screen is flickering. For 20 seconds Liberator records how the driver puts frames on the display (flip counts and timing, refused updates, the refresh rate and WindowServer's load), then sends it with the ordinary logs. Keep using the Mac normally while it records.\n\n") + a.informativeText
         }
-        a.addButton(withTitle: "Send"); a.addButton(withTitle: "Cancel")
+        a.addButton(withTitle: L10n.text("Send")); a.addButton(withTitle: L10n.text("Cancel"))
         guard a.runModal() == .alertFirstButtonReturn else { send("logsDone", ["ok": false, "why": "Not sent."]); return }
         DispatchQueue.global().async {
             let fm = FileManager.default
@@ -1478,9 +1490,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
         var reachedDesktopConsent = false
         if mode == "install" {
             let a = NSAlert()
-            a.messageText = "Tell NullMoth this install worked?"
-            a.informativeText = "After this Mac restarts and reaches its desktop, Liberator can send one small confirmation to nullmothsystems.com - the macOS version, this Mac's model and CPU, the graphics cards, whether the display and the NVIDIA driver came up, and 1401's and OpenCore's versions - so a working install can be told apart from one that failed silently. It is sent once, then removes itself. Your name, your Mac's name, serial numbers and addresses are removed first. Nothing is sent unless you choose Send."
-            a.addButton(withTitle: "Send once after it boots"); a.addButton(withTitle: "Don't send")
+            a.messageText = L10n.text("Tell NullMoth this install worked?")
+            a.informativeText = L10n.text("After this Mac restarts and reaches its desktop, Liberator can send one small confirmation to nullmothsystems.com - the macOS version, this Mac's model and CPU, the graphics cards, whether the display and the NVIDIA driver came up, and 1401's and OpenCore's versions - so a working install can be told apart from one that failed silently. It is sent once, then removes itself. Your name, your Mac's name, serial numbers and addresses are removed first. Nothing is sent unless you choose Send.")
+            a.addButton(withTitle: L10n.text("Send once after it boots")); a.addButton(withTitle: L10n.text("Don't send"))
             reachedDesktopConsent = a.runModal() == .alertFirstButtonReturn
         }
         let log: URL
@@ -1561,7 +1573,7 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                     let newest = r.lines.last(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.hasPrefix("RESULT ") && !GoldenGateProgress.isControl($0) }) ?? ""
                     if !newest.isEmpty { self.send("ggprogress", redact(String(newest.prefix(300)))) }
                     // The bar is sent on every look, not only when a line came: one stage moves by elapsed time.
-                    if bar.active { let b = bar.show(at: now); self.send("ggbar", ["pct": b.percent, "text": b.text]) }
+                    if bar.active { let b = bar.show(at: now); self.send("ggbar", ["pct": b.percent, "text": L10n.progress(b.text)]) }
                 }
                 t.resume(); watch = t
             }
@@ -1615,9 +1627,9 @@ final class App: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDe
                 }
                 if !cancelled && !kept.isEmpty {
                     let a = NSAlert()
-                    a.messageText = "Your previous files are kept"
-                    a.informativeText = "Nothing this update replaced was deleted. If anything does not work as before, these copies are what was in place:\n\n" + kept.map { "• " + $0 }.joined(separator: "\n")
-                    a.addButton(withTitle: "OK")
+                    a.messageText = L10n.text("Your previous files are kept")
+                    a.informativeText = L10n.text("Nothing this update replaced was deleted. If anything does not work as before, these copies are what was in place:\n\n") + kept.map { "• " + $0 }.joined(separator: "\n")
+                    a.addButton(withTitle: L10n.text("OK"))
                     a.runModal()
                 }
             }

@@ -65,8 +65,8 @@ arm("the choice is written right after the system package is installed",
     re.search(r'\$sinst" --payload "\$SPAY" --system "\$SYS" --data "\$DATA" --esp "\$ROOT" --apply \|\| stop [^\n]*\n  report_choice "\$DATA"\n', gg) is not None)
 arm("setup passes the answer on the finish step only, with the tag from the kit pin",
     '$([ "$1" = finish ] && echo "--report $([ -n "${GGREPORT:-}" ] && echo yes || echo no) --kit-tag ' in setup and "--report-consent) GGREPORT=1;;" in setup)
-ask = main.find('r.messageText = "Tell NullMoth how macOS 27 starts on this PC?"')
+ask = main.find('r.messageText = L10n.text("Tell NullMoth how macOS 27 starts on this PC?")')
 arm("the app asks before the one-button run and sends the option only on Send",
     ask > 0 and 'if r.runModal() == .alertFirstButtonReturn { extra.append("--report-consent") }' in main[ask:ask + 1500]
-    and 'r.addButton(withTitle: "Send"); r.addButton(withTitle: "Don\'t send")' in main[ask:ask + 1500])
+    and 'r.addButton(withTitle: L10n.text("Send")); r.addButton(withTitle: L10n.text("Don\'t send"))' in main[ask:ask + 1500])
 print(f"{failed} failed"); sys.exit(1 if failed else 0)

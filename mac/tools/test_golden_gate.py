@@ -1519,7 +1519,7 @@ case " $* " in *" --apply "*) [ "$1" = --out ] && echo boot > "$2/BootKernelExte
     arm("status writes no step log", rc == 0 and not os.path.exists(os.path.join(td, "status.log")), out)
     appjs_flow = (ROOT / "Resources/app.js").read_text()
     arm("the app shows the newest line of the step log while a step runs, and gives the install step hours",
-        'if (event === "ggprogress") $("ggt").textContent = data;' in appjs_flow
+        'if (event === "ggprogress") $("ggt").textContent = t(data);' in appjs_flow
         and "limit = GoldenGate.timeLimit(step: extra.count > 1 ? extra[1] : \"\")" in (ROOT / "Sources/main.swift").read_text()
         and "let run = Privileged.run(cmd, timeout: limit)" in (ROOT / "Sources/main.swift").read_text())
     setup_flow = (ROOT / "Resources/nullmoth-setup.sh").read_text()
@@ -1530,8 +1530,8 @@ case " $* " in *" --apply "*) [ "$1" = --out ] && echo boot > "$2/BootKernelExte
         '<input type="checkbox" id="ggnew"> Set up as a new Mac instead' in page and 'id="ggnew" checked' not in page and "ggbring" not in page + appjs_flow
         and 'bringAccount: !$("ggnew").checked' in appjs_flow
         and 'let bring = b["bringAccount"] as? Bool == true' in main_flow and 'if bring { extra += ["--bring-account", NSUserName()] }' in main_flow
-        and 'bring ? "\\n\\nmacOS 27 will start with your account brought over." : "\\n\\nmacOS 27 will start at Apple\'s setup like a new Mac."' in main_flow
-        and main_flow.index("a.informativeText += bring") < main_flow.index('a.addButton(withTitle: "Prepare for Golden Gate")')
+        and 'bring ? L10n.text("\\n\\nmacOS 27 will start with your account brought over.") : L10n.text("\\n\\nmacOS 27 will start at Apple\'s setup like a new Mac.")' in main_flow
+        and main_flow.index("a.informativeText += bring") < main_flow.index('a.addButton(withTitle: L10n.text("Prepare for Golden Gate"))')
         and 'if step == "installer", b["bringAccount"] as? Bool == true { extra += ["--bring-account", NSUserName()] }' in main_flow
         and '${GGACCOUNT:+--bring-account "$GGACCOUNT"}' in setup_flow)
     hidden_row = page[page.index('<p hidden><button type="button" id="ggkit"'):]
@@ -1753,7 +1753,7 @@ arm("the lines made by setup go to the step log the app follows, and the kit dow
     "GGSTEPLOG=/Library/NullMoth/golden-gate/steps.log" in setup and '"PROGRESS "*) ggmark "$l";;' in setup
     and setup.count("| ggkitlines drop; ggkrc=${PIPESTATUS[0]}") == 2 and setup.count("| ggkitlines keep; ggkrc=${PIPESTATUS[0]}") == 2)
 arm("the app reads every new line for the bar, sends the bar apart from the text line, and keeps bar lines out of the log on the page",
-    "for l in r.lines { bar.take(l, at: now) }" in main and 'self.send("ggbar", ["pct": b.percent, "text": b.text])' in main
+    "for l in r.lines { bar.take(l, at: now) }" in main and 'self.send("ggbar", ["pct": b.percent, "text": L10n.progress(b.text)])' in main
     and ".filter { !GoldenGateProgress.isControl($0) }" in main and "!GoldenGateProgress.isControl($0) }) ?? \"\"" in main)
 arm("the page has the bar and its line in the card, hidden until the app sends one, and a new run starts it again",
     'id="ggbar" hidden' in html and 'id="ggbart" hidden' in html and html.index('id="ggbar"') > html.index('id="ggcard"')
@@ -1763,12 +1763,12 @@ arm("the app shows the card only for an installed kit or a build that carries a 
     '"goldenGate": !GoldenGate.kit().isEmpty || App.goldenGateKitState() != "none",' in main
     and 0 < main.index("if let why = GoldenGate.refusal(step: step, major: OSGate.currentMajor, kit: kit, kitState: App.goldenGateKitState())")
     < main.index('run(mode: "goldengate"'))
-one = main.index('a.messageText = "Prepare this Mac for macOS 27 and start from its startup files?"')
-single = main.index('a.messageText = "Start this Mac from the macOS 27 startup files?"')
+one = main.index('a.messageText = L10n.text("Prepare this Mac for macOS 27 and start from its startup files?")')
+single = main.index('a.messageText = L10n.text("Start this Mac from the macOS 27 startup files?")')
 confirms = [i for i in range(len(main)) if main.startswith('extra.append("--confirm")', i)]
-rm_q = main.index('a.messageText = "Remove macOS 27 from this Mac?"')
-clr_q = main.index('a.messageText = "Clear the Golden Gate downloads?"')
-drv_q = main.index('a.messageText = off ? "Turn off the unproven drivers for macOS 27?"')
+rm_q = main.index('a.messageText = L10n.text("Remove macOS 27 from this Mac?")')
+clr_q = main.index('a.messageText = L10n.text("Clear the Golden Gate downloads?")')
+drv_q = main.index('a.messageText = off ? L10n.text("Turn off the unproven drivers for macOS 27?")')
 GUARD = "guard a.runModal() == .alertSecondButtonReturn else"
 arm("--confirm is passed only after the user's yes: the whole move, removing macOS 27, clearing the downloads, the drivers switch, the single switch",
     main.count('"--confirm"') == 5 and len(confirms) == 5 and one < confirms[0] < rm_q < confirms[1] < clr_q < confirms[2] < drv_q < confirms[3] < single < confirms[4]

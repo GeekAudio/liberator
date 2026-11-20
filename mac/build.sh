@@ -9,7 +9,7 @@ rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Python checker decided the same way (tests/efi_rules, cases from tools/efi_rules_vectors.py).
 T=$(mktemp -d)
 xcrun swiftc -O -target x86_64-apple-macos15.0 -sdk "$SDK" Sources/EfiRules.swift tests/efi_rules/main.swift -o "$T/efi_rules_test"
-RUN=(); [ "$(uname -m)" = arm64 ] && RUN=(arch -x86_64)
+RUN=(/usr/bin/arch -x86_64)
 "${RUN[@]}" "$T/efi_rules_test" ../p1401/efi_rules.json tests/efi_rules/vectors.json || { echo "STOP: the Mac EFI checker disagrees with 1401's"; exit 1; }
 xcrun swiftc -O -target x86_64-apple-macos15.0 -sdk "$SDK" Sources/TitleBar.swift tests/title_bar/main.swift -o "$T/title_bar_test"
 "${RUN[@]}" "$T/title_bar_test" || { echo "STOP: the window cannot be dragged by its title bar"; exit 1; }
@@ -56,7 +56,7 @@ chmod 755 "$APP/Contents/Resources/nullmoth-v3-kit.sh"
 rm -f "$APP/Contents/Resources/v3-kit.pin"
 if [ -n "${V3_KIT_PIN:-}" ]; then
   [ "$(grep -c -E '^(name|tag|size|sha256) [A-Za-z0-9._-]+$' "$V3_KIT_PIN")" = 4 ] || { echo "STOP: V3_KIT_PIN is not a kit pin (name, tag, size, sha256)"; exit 1; }
-  cp "$V3_KIT_PIN" "$APP/Contents/Resources/v3-kit.pin"; chmod 644 "$APP/Contents/Resources/v3-kit.pin"
+  cp -X "$V3_KIT_PIN" "$APP/Contents/Resources/v3-kit.pin"; chmod 644 "$APP/Contents/Resources/v3-kit.pin"
 fi
 # setup runs the installers only when they are executable ([ -x ]); a source file that lost its mode made every app
 # install stop with "the audited installer is missing from the app" (1.15 review), so the bundle sets it here
@@ -71,8 +71,8 @@ strip -S "$APP/Contents/Resources/nullmoth-diagnostics-preflight"
 codesign --force --runtime-version 15.0.0 --options runtime,library -s - "$APP/Contents/Resources/nullmoth-diagnostics-preflight"
 IS=$(mktemp -d)/m.iconset; mkdir -p "$IS"
 for s in 16 32 128 256 512; do
-  sips -z $s $s Resources/moth-mark.jpg --setProperty format png --out "$IS/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) Resources/moth-mark.jpg --setProperty format png --out "$IS/icon_${s}x${s}@2x.png" >/dev/null
+  sips -z $s $s Resources/community-mark.png --setProperty format png --out "$IS/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s*2)) $((s*2)) Resources/community-mark.png --setProperty format png --out "$IS/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$IS" -o "$APP/Contents/Resources/Liberator.icns"
 cat > "$APP/Contents/Info.plist" <<PL
@@ -80,11 +80,12 @@ cat > "$APP/Contents/Info.plist" <<PL
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleDevelopmentRegion</key><string>en</string>
+<key>CFBundleLocalizations</key><array><string>en</string><string>zh-Hans</string><string>zh-Hant</string></array>
 <key>CFBundleExecutable</key><string>Liberator</string>
 <key>CFBundleIconFile</key><string>Liberator</string>
-<key>CFBundleIdentifier</key><string>com.nullmoth.liberator</string>
-<key>CFBundleName</key><string>Liberator</string>
-<key>CFBundleDisplayName</key><string>Liberator</string>
+<key>CFBundleIdentifier</key><string>io.github.geekaudio.liberator-zh</string>
+<key>CFBundleName</key><string>Liberator ZH</string>
+<key>CFBundleDisplayName</key><string>Liberator ZH</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>0.4.0</string>
 <key>CFBundleVersion</key><string>1</string>
@@ -109,8 +110,11 @@ HASHES=$(mktemp -d)/BundleHashes.swift
   done
   echo '    ]'; echo '}'
 } > "$HASHES"
+# Localized presentation resources are signed with the app. They are outside the
+# flat resource set passed to privileged operations.
+cp -RX Localizations/{zh-Hans,zh-Hant}.lproj "$APP/Contents/Resources/"
 xcrun swiftc -O -target x86_64-apple-macos15.0 -sdk "$SDK" -framework WebKit -framework Metal -framework IOKit \
-  Sources/main.swift Sources/TesterLane.swift Sources/ArmApps.swift Sources/ReachedDesktop.swift Sources/profile.swift Sources/redaction.swift Sources/actions.swift Sources/diagnostics.swift Sources/HardwareMap.swift Sources/HardwareMapWorker.swift Sources/NativePeripheralFacts.swift Sources/SavedReports.swift Sources/ReportQueue.swift Sources/Privileged.swift Sources/ReleaseSignature.swift Sources/UpdateChannel.swift Sources/Mirror.swift Sources/EfiRules.swift Sources/EfiCheck.swift Sources/TitleBar.swift Sources/OSGate.swift "$HASHES" -o "$APP/Contents/MacOS/Liberator"
+  Sources/main.swift Sources/L10n.swift Sources/TesterLane.swift Sources/ArmApps.swift Sources/ReachedDesktop.swift Sources/profile.swift Sources/redaction.swift Sources/actions.swift Sources/diagnostics.swift Sources/HardwareMap.swift Sources/HardwareMapWorker.swift Sources/NativePeripheralFacts.swift Sources/SavedReports.swift Sources/ReportQueue.swift Sources/Privileged.swift Sources/ReleaseSignature.swift Sources/UpdateChannel.swift Sources/Mirror.swift Sources/EfiRules.swift Sources/EfiCheck.swift Sources/TitleBar.swift Sources/OSGate.swift "$HASHES" -o "$APP/Contents/MacOS/Liberator"
 # --options runtime,library: library validation, so only code signed by the
 # same identity loads into the bundle. Was a bare ad-hoc signature, which let
 # any dropped-in library load into the process that asks for the password.
