@@ -721,9 +721,12 @@ bool A2XVTdStartMapper(const void *dmar, uint32_t len, IOService *platform);   /
 
 bool A2XACPIPlatformExpert::start(IOService *provider)
 {
-    {   // breadcrumbs first, so every later step is visible even if the console stops
+    {   // On-screen breadcrumbs (a counter and a ring of rows, top left) are a bring-up aid and are off by default:
+        // a verbose start shows the kernel's own text, as on a Mac. Boot argument a2xcrumbs=1 draws them again.
+        // Off, the crumbs still count (the heartbeat log reports them) but never map or draw the framebuffer.
         PE_Video v; bzero(&v, sizeof v);
-        if (getConsoleInfo(&v) == kIOReturnSuccess)
+        UInt32 crumbs = 0;
+        if (PE_parse_boot_argn("a2xcrumbs", &crumbs, sizeof crumbs) && crumbs && getConsoleInfo(&v) == kIOReturnSuccess)
             a2x_crumb_init((uint64_t)v.v_baseAddr, (uint32_t)v.v_rowBytes, (uint32_t)v.v_width, (uint32_t)v.v_height, (uint32_t)v.v_depth);
     }
     {   // console-follow state (confollow.h) before any host bridge starts its configurator
