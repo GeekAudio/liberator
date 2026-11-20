@@ -635,8 +635,17 @@ static bool enabled()
 
 IOService *NMXAudio::probe(IOService *provider, SInt32 *score)
 {
-    if (OSDynamicCast(IOPCIDevice, provider) == nullptr || !enabled())
+    auto *pci = OSDynamicCast(IOPCIDevice, provider);
+    if (pci == nullptr || !enabled())
         return nullptr;
+
+    // Apple's HDA controller gets first refusal on onboard audio. Preserve
+    // the configured priority for NVIDIA display audio.
+    constexpr UInt16 nvidiaVendor = 0x10de;
+    constexpr SInt32 fallbackScore = -1000;
+    if (score != nullptr && pci->configRead16(kIOPCIConfigVendorID) != nvidiaVendor)
+        *score = fallbackScore;
+
     return IOService::probe(provider, score);
 }
 
