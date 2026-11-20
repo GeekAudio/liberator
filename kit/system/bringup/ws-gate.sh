@@ -254,6 +254,12 @@ cap_log() {
   tail -c 524288 "$f" > "$f.cap" 2>/dev/null && cat "$f.cap" > "$f"; rm -f "$f.cap"
 }
 wsgate_main() {
+  # Driver off (-nvoff): there is no NVIDIA display head to wait for. The firmware framebuffer is the display, so the
+  # window server starts on it at once instead of after the 300 s wait.
+  case " $(sysctl_r kern.bootargs) " in *" -nvoff "*)
+    say "driver off (-nvoff): starting WindowServer on the firmware framebuffer now"; coredisplay_off
+    [ -e "$MARK" ] || echo "firmware $(date '+%T') nvoff" >> "$MARK"; start_windowserver "$@";;
+  esac
   cap_log "$LOG"; cap_log /var/log/nullmoth-ws-stderr.log
   if [ ! -e "$MARK" ]; then
     : > "$MARK"
