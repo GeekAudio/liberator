@@ -16,7 +16,7 @@ BIOS facts are checked against the Dortania OpenCore Install Guide, but the word
 CC BY-NC-SA, so none of its text is copied into this GPL-3 project).
 
     python3 -m p1401.guide <Report.json> <config.plist> [--bitlocker On|Off] [--macos 25]
-    python3 -m p1401.guide <Report.json> <config.plist> --html guide.html [--mark other.jpg]   (default: the NullMoth mark beside this file)
+    python3 -m p1401.guide <Report.json> <config.plist> --html guide.html [--mark other.jpg]   (default: the community mark beside this file)
 """
 import base64
 import html
@@ -446,7 +446,7 @@ def app_html(report, steps, macos="", mark=None, uid="g", prerequisites=False):
              if any(st.blocker for st in steps) else "")
     return f'''<div class="app" id="{uid}">
 <center class="top">
-<table class="logo" role="presentation" cellspacing="0" cellpadding="0"><tr><td>{img}</td><td class="word"><span class="nm">NullMoth</span> <span class="sy">Systems</span><br><span class="ig">{heading}</span>{context_suffix}</td></tr></table>
+<table class="logo" role="presentation" cellspacing="0" cellpadding="0"><tr><td>{img}</td><td class="word"><span class="nm">GeekAudio</span><br><span class="ig">{heading}</span>{context_suffix}</td></tr></table>
 </center>
 <div class="ticker" aria-hidden="true"><span>{ticker}</span></div>
 <p class="hello">{introduction}{first}</p>
@@ -461,7 +461,7 @@ def app_html(report, steps, macos="", mark=None, uid="g", prerequisites=False):
 <center class="foot">
 <hr width="80%">
 <p><a href="#{uid}">{_inline(loc.t("Back to the top"))}</a></p>
-<p class="badges" aria-hidden="true"><span class="bd bd1">NullMoth</span><span class="bd bd2">{_inline(loc.t("VIEWABLE WITH"))}<br>{_inline(loc.t("ANY BROWSER"))}</span><span class="bd bd3">{_inline(loc.t("NO COOKIES"))}<br>{_inline(loc.t("NO TRACKING"))}</span><span class="bd bd4">{_inline(loc.t("FREE"))}<br>{_inline(loc.t("FOREVER"))}</span></p>
+<p class="badges" aria-hidden="true"><span class="bd bd1">GeekAudio</span><span class="bd bd2">{_inline(loc.t("VIEWABLE WITH"))}<br>{_inline(loc.t("ANY BROWSER"))}</span><span class="bd bd3">{_inline(loc.t("NO COOKIES"))}<br>{_inline(loc.t("NO TRACKING"))}</span><span class="bd bd4">{_inline(loc.t("FREE"))}<br>{_inline(loc.t("FOREVER"))}</span></p>
 <p class="counter">{_inline(loc.t("You are visitor number "))}<b>000001</b>{_inline(loc.t(" (it's only ever you &mdash; this page never left this PC)"))}</p>
 <p>{_inline(loc.t("Community build maintained by GeekAudio."))}</p>
 <p class="present">{_inline(loc.t("Present day. Present time."))}</p>
@@ -478,8 +478,7 @@ def assets():
 
 
 def render_html(report, steps, macos="", mark=None, prerequisites=False):
-    """mark=None puts in the NullMoth mark that ships beside this file (128 px JPEG, no EXIF); b"" leaves it out.
-    The mark and the NullMoth name aren't covered by the GPL (see NOTICE.md); modified builds must remove them."""
+    """mark=None uses the community mark beside this file. b"" omits the mark."""
     if mark is None:
         with open(os.path.join(HERE, "moth-mark.jpg"), "rb") as fh:
             mark = fh.read()
@@ -622,7 +621,7 @@ def selftest():
     arm("the page names the app (1401) and downstream maintainer (GeekAudio)", not unnamed, unnamed or "all")
     bare = render_html(reports["dell-e7470"], build_guide(reports["dell-e7470"], configs.get("dell-e7470", {})), mark=b"")
     unmarked = [m for m in good if 'class="mark" src="data:image/jpeg;base64,' not in pages[m]]
-    arm("every page carries the NullMoth mark from the repo by default, and the check fires on a page without it",
+    arm("every page carries the community mark from the repo by default, and the check fires on a page without it",
         not unmarked and 'class="mark"' not in bare, unmarked or "all, control fires")
     arm("vendor keys render as keycaps", "<kbd>F2</kbd>" in pages["dell-e7470"]
         and "<kbd>F12</kbd>" in pages["dell-e7470"], "Dell F2/F12")
