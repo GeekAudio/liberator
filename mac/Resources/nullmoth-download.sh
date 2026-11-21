@@ -28,6 +28,38 @@ nm_range_matches() {
     ' "$piece.headers"
 }
 
+nm_rank_download_sources() {
+  local total=$1 protocol=$2 work=$3 url piece i=0 status elapsed
+  shift 3
+  case "$protocol" in
+    '=https'|'=http') ;;
+    *) printf '%s\n' "$@"; return;;
+  esac
+  local pids
+  # Fetch one byte from each candidate at the same time. Sources that do not
+  # prove Range support stay available for a normal transfer if needed.
+  for url in "$@"; do
+    piece="$work/probe.$i"
+    (nm_range_curl "$url" "$protocol" 0-0 1 "$piece" --max-time 5 \
+      --write-out '%{http_code} %{time_total}\n') > "$piece.result" 2>/dev/null &
+    pids[$i]=$!
+    i=$((i + 1))
+  done
+  : > "$work/source-ranks"
+  i=0
+  for url in "$@"; do
+    piece="$work/probe.$i"
+    if wait "${pids[$i]}" && read -r status elapsed < "$piece.result"; then
+      printf '%s\n' "$status" > "$piece.status"
+      if nm_range_matches "$piece" 0-0 "$total" 1; then
+        printf '%s %s\n' "$elapsed" "$url" >> "$work/source-ranks"
+      fi
+    fi
+    i=$((i + 1))
+  done
+  { LC_ALL=C sort -s -n "$work/source-ranks" | cut -d ' ' -f 2-; printf '%s\n' "$@"; } | awk '!seen[$0]++'
+}
+
 nm_wait_for_curl() {
   local pid=$1 status=0
   wait "$pid" || status=$?

@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Exercise the macOS downloader on loopback, with no kit install or network downloads."""
+import hashlib
 import http.server
+import io
 import pathlib
 import random
 import re
 import subprocess
+import tarfile
 import tempfile
 import threading
+import time
 import unittest
 
 MAC = pathlib.Path(__file__).resolve().parents[1]
@@ -158,6 +162,83 @@ class ParallelDownloadTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), "https://example.invalid/image a path with spaces 99999999 =https")
+
+
+class MirrorHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *_):
+        pass
+
+    def do_GET(self):
+        mirror = self.path.split("/")[1]
+        payload = self.server.payload
+        if mirror == "unavailable":
+            self.send_error(404)
+            return
+        probe = self.headers.get("Range") == "bytes=0-0"
+        partial = probe and mirror != "no-range"
+        self.send_response(206 if partial else 200)
+        if partial:
+            if mirror == "slow":
+                time.sleep(0.3)
+            total = len(payload) + (mirror == "wrong-size")
+            self.send_header("Content-Range", f"bytes 0-0/{total}")
+            payload = payload[:1]
+        elif not probe:
+            self.server.transfers.append(mirror)
+            if mirror == "corrupt":
+                payload = bytes([payload[0] ^ 1]) + payload[1:]
+        self.send_header("Content-Length", str(len(payload)))
+        try:
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
+
+class KitMirrorTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.folder = pathlib.Path(temporary.name)
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as tar:
+            directory = tarfile.TarInfo("v3-kit/")
+            directory.type = tarfile.DIRTYPE
+            directory.mode = 0o755
+            tar.addfile(directory)
+            manifest = tarfile.TarInfo("v3-kit/v3-kit.json")
+            manifest.size = 2
+            tar.addfile(manifest, io.BytesIO(b"{}"))
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), MirrorHandler)
+        self.server.payload = archive.getvalue()
+        self.server.transfers = []
+        thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        digest = hashlib.sha256(self.server.payload).hexdigest()
+        self.pin = self.folder / "v3-kit.pin"
+        self.pin.write_text(f"name kit.tar.gz\ntag v3-test\nsize {len(self.server.payload)}\nsha256 {digest}\n")
+
+    def get_kit(self, *mirrors):
+        bases = " ".join(f"http://127.0.0.1:{self.server.server_port}/{name}" for name in mirrors)
+        result = subprocess.run(
+            [BASH, str(MAC / "Resources/nullmoth-v3-kit.sh"), "get", "--dest", str(self.folder / "v3-kit"),
+             "--pin", str(self.pin), "--bases", bases, "--protocol", "=http"],
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.folder / "v3-kit/v3-kit.json").is_file())
+        return result.stdout
+
+    def test_ranks_responsive_sources_and_retries_after_a_bad_checksum(self):
+        output = self.get_kit("slow", "wrong-size", "corrupt")
+        self.assertEqual(self.server.transfers, ["corrupt", "slow"])
+        self.assertIn("the archive's checksum does not match", output)
+
+    def test_falls_back_to_a_source_without_range_support(self):
+        self.get_kit("unavailable", "no-range")
+        self.assertEqual(self.server.transfers, ["no-range"])
 
 
 if __name__ == "__main__":

@@ -96,17 +96,41 @@ WORK=$(mktemp -d "$PARENT/.v3-kit.XXXXXXXX") || stop "could not make a work fold
 chmod 700 "$WORK"
 A="$WORK/archive"
 
+check_kit_archive() {
+  local size sum
+  size=$(stat -f '%z' "$A") || return 1
+  if [ "$size" != "$KSIZE" ]; then
+    echo "the archive is $size bytes, the kit is $KSIZE: this is not the kit this build of 1401 uses. Nothing was changed"
+    return 1
+  fi
+  sum=$(shasum -a 256 "$A" | awk '{print $1}')
+  if [ "$sum" != "$KSHA" ]; then
+    echo "the archive's checksum does not match: this is not the kit this build of 1401 uses. Nothing was changed"
+    return 1
+  fi
+}
+
 step "the archive"
 if [ -n "$FILE" ]; then
   [ -f "$FILE" ] || stop "$FILE is not a file. Nothing was changed"
   cat "$FILE" > "$A" || stop "could not read $FILE. Nothing was changed"
   ok "taken from $FILE"
+  reason=$(check_kit_archive) || stop "$reason"
 else
   got=0
   DL="$HERE/nullmoth-download.sh"
-  [ ! -r "$DL" ] || . "$DL"
+  sources=()
   for b in $BASES; do
     case "$b" in *github.com*) u="$b/$KTAG/$KNAME";; *) u="$b/$KNAME";; esac
+    sources+=("$u")
+  done
+  if [ -r "$DL" ]; then
+    . "$DL"
+    ordered=$(nm_rank_download_sources "$KSIZE" "$PROTO" "$WORK" "${sources[@]}")
+  else
+    ordered=$(printf '%s\n' "${sources[@]}")
+  fi
+  while IFS= read -r u; do
     say "NOTE downloading $u"
     # curl runs silent (its own meter is not for a window); how far it is comes from the size of the file so far,
     # as "PROGRESS kit-download <percent> <bytes so far> <bytes in all>" lines, which 1401 draws as a bar.
@@ -123,15 +147,18 @@ else
       sz=$(stat -f '%z' "$A" 2>/dev/null || echo 0); [ "$sz" -le "$KSIZE" ] || sz=$KSIZE
       [ "$KSIZE" -gt 0 ] && echo "PROGRESS kit-download $(( sz * 100 / KSIZE )) $sz $KSIZE"
     done
-    if wait "$cpid"; then echo "PROGRESS kit-download 100 $KSIZE $KSIZE"; got=1; break; fi
+    if wait "$cpid"; then
+      if reason=$(check_kit_archive); then
+        echo "PROGRESS kit-download 100 $KSIZE $KSIZE"
+        got=1
+        break
+      fi
+      say "NOTE $reason"
+    fi
     rm -f "$A"
-  done
+  done <<< "$ordered"
   [ "$got" = 1 ] || stop "the kit could not be downloaded. Check the internet connection and try again. Nothing was changed"
 fi
-sz=$(stat -f '%z' "$A")
-[ "$sz" = "$KSIZE" ] || stop "the archive is $sz bytes, the kit is $KSIZE: this is not the kit this build of 1401 uses. Nothing was changed"
-sum=$(shasum -a 256 "$A" | awk '{print $1}')
-[ "$sum" = "$KSHA" ] || stop "the archive's checksum does not match: this is not the kit this build of 1401 uses. Nothing was changed"
 ok "size and SHA-256 match"
 
 step "what the archive holds"
