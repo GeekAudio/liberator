@@ -1,6 +1,6 @@
 # Liberator 中文本地化
 
-Liberator ZH 由 GeekAudio 独立维护，基于 [Liberator 0.5.0 / v3.0.0-beta.5](https://github.com/nullmoth/liberator/releases/tag/v3.0.0-beta.5)。应用根据 macOS 的应用语言加载简体中文或繁体中文，其他语言使用上游英文文案。
+Liberator ZH 由 GeekAudio 独立维护，基于 [Liberator 0.6.0 / v3.0.0-beta.6](https://github.com/nullmoth/liberator/releases/tag/v3.0.0-beta.6)。应用根据 macOS 的应用语言加载简体中文或繁体中文，其他语言使用上游英文文案。
 
 - `zh-Hans.lproj/Interface.json` 与 `zh-Hant.lproj/Interface.json` 共用英文原文作为键。AppKit 弹窗、WebKit 页面、运行状态及 EFI 检查建议使用同一份译文。
 - 含粗体、链接和控件的段落按完整语义翻译。`{1}`、`{2}` 等占位符对应原段落的内联元素，可以按中文语序调整位置，每个占位符保留一次。
@@ -38,7 +38,7 @@ done
 
 ```sh
 build_dir=$(mktemp -d)
-V3_KIT_PIN="$PWD/release/beta5/v3-kit.pin" bash mac/build.sh "$build_dir"
+V3_KIT_PIN="$PWD/release/beta6/v3-kit.pin" bash mac/build.sh "$build_dir"
 codesign --verify --deep --strict "$build_dir/Liberator.app"
 ```
 
